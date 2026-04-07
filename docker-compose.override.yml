@@ -8,7 +8,6 @@ services:
   hermes:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
-      - SIGNAL_ALLOW_ALL_USERS=true
       - CAMOFOX_URL=http://camofox:9377
     volumes:
       - .data/hermes:/opt/data
@@ -17,8 +16,6 @@ services:
       # Change this if ai.local moves to a different IP.
       - "ai.local:192.168.87.153"
     depends_on:
-      signal:
-        condition: service_healthy
       camofox:
         condition: service_healthy
 
