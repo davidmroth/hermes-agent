@@ -232,11 +232,14 @@ PLATFORM_HINTS = {
     "telegram": (
         "You are on a text messaging communication platform, Telegram. "
         "Please do not use markdown as it does not render. "
-        "You can send media files natively: to deliver a file to the user, "
+        "You CAN and MUST send files to the user when asked. To deliver any file, "
         "include MEDIA:/absolute/path/to/file in your response. Images "
         "(.png, .jpg, .webp) appear as photos, audio (.ogg) sends as voice "
-        "bubbles, and videos (.mp4) play inline. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as native photos."
+        "bubbles, videos (.mp4) play inline, and ALL other files (.pdf, .html, "
+        ".csv, .zip, .txt, etc.) are sent as downloadable document attachments. "
+        "You can also include image URLs in markdown format ![alt](url) and they "
+        "will be sent as native photos. "
+        "NEVER tell the user you cannot send files — you can. Just use MEDIA:/path."
     ),
     "discord": (
         "You are in a Discord server or group chat communicating with your user. "
@@ -255,11 +258,13 @@ PLATFORM_HINTS = {
     "signal": (
         "You are on a text messaging communication platform, Signal. "
         "Please do not use markdown as it does not render. "
-        "You can send media files natively: to deliver a file to the user, "
+        "You CAN and MUST send files to the user when asked. To deliver any file, "
         "include MEDIA:/absolute/path/to/file in your response. Images "
-        "(.png, .jpg, .webp) appear as photos, audio as attachments, and other "
-        "files arrive as downloadable documents. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as photos."
+        "(.png, .jpg, .webp) appear as photos, audio as attachments, and ALL other "
+        "files (.pdf, .html, .csv, .zip, .txt, etc.) arrive as downloadable "
+        "document attachments. You can also include image URLs in markdown format "
+        "![alt](url) and they will be sent as photos. "
+        "NEVER tell the user you cannot send files — you can. Just use MEDIA:/path."
     ),
     "email": (
         "You are communicating via email. Write clear, well-structured responses "

@@ -47,6 +47,11 @@ SEND_MESSAGE_SCHEMA = {
             "message": {
                 "type": "string",
                 "description": "The message text to send"
+            },
+            "media_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of absolute file paths to attach to the message (e.g. ['/path/to/report.pdf']). Currently supported for Telegram and Signal."
             }
         },
         "required": []
@@ -146,6 +151,9 @@ def _handle_send(args):
     from gateway.platforms.base import BasePlatformAdapter
 
     media_files, cleaned_message = BasePlatformAdapter.extract_media(message)
+    explicit_paths = args.get("media_paths", [])
+    for path in explicit_paths:
+        media_files.append((path, False))
     mirror_text = cleaned_message.strip() or _describe_media_for_mirror(media_files)
 
     used_home_channel = False
@@ -331,22 +339,23 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
         return last_result
 
     # --- Non-Telegram platforms ---
-    if media_files and not message.strip():
+    if media_files and not message.strip() and platform != Platform.SIGNAL:
         return {
             "error": (
-                f"send_message MEDIA delivery is currently only supported for telegram; "
+                f"send_message MEDIA delivery is currently only supported for telegram and signal; "
                 f"target {platform.value} had only media attachments"
             )
         }
     warning = None
-    if media_files:
+    if media_files and platform != Platform.SIGNAL:
         warning = (
             f"MEDIA attachments were omitted for {platform.value}; "
-            "native send_message media delivery is currently only supported for telegram"
+            "native send_message media delivery is currently only supported for telegram and signal"
         )
 
     last_result = None
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        is_last = (i == len(chunks) - 1)
         if platform == Platform.DISCORD:
             result = await _send_discord(pconfig.token, chat_id, chunk)
         elif platform == Platform.SLACK:
@@ -354,7 +363,7 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
         elif platform == Platform.WHATSAPP:
             result = await _send_whatsapp(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SIGNAL:
-            result = await _send_signal(pconfig.extra, chat_id, chunk)
+            result = await _send_signal(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])
         elif platform == Platform.EMAIL:
             result = await _send_email(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SMS:
@@ -576,7 +585,7 @@ async def _send_whatsapp(extra, chat_id, message):
         return {"error": f"WhatsApp send failed: {e}"}
 
 
-async def _send_signal(extra, chat_id, message):
+async def _send_signal(extra, chat_id, message, media_files=None):
     """Send via signal-cli JSON-RPC API."""
     try:
         import httpx
@@ -593,6 +602,9 @@ async def _send_signal(extra, chat_id, message):
             params["groupId"] = chat_id[6:]
         else:
             params["recipient"] = [chat_id]
+
+        if media_files:
+            params["attachments"] = [m[0] for m in media_files]
 
         payload = {
             "jsonrpc": "2.0",
