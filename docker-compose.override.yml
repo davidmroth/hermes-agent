@@ -9,8 +9,13 @@ services:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
       - CAMOFOX_URL=http://camofox:9377
+      # AgentLens observability
+      - AGENTLENS_SERVER_URL=http://agentlens:8500
+      - PYTHONPATH=/opt/hermes:/opt/agentlens-sdk
     volumes:
       - .data/hermes:/opt/data
+      # AgentLens SDK — makes `from sdk import AgentLensClient` work
+      - ../agentlens:/opt/agentlens-sdk
     extra_hosts:
       # Point to the actual IP of your llama.cpp server.
       # Change this if ai.local moves to a different IP.
@@ -18,6 +23,9 @@ services:
     depends_on:
       camofox:
         condition: service_healthy
+    networks:
+      - default
+      - agentlens_default
 
   signal:
     #ports:
@@ -78,3 +86,7 @@ services:
       options:
         max-file: "3"
         max-size: "10m"
+
+networks:
+  agentlens_default:
+    external: true
