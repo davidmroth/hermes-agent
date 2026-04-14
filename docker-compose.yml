@@ -36,7 +36,6 @@ services:
       # for isolated sandbox execution via the terminal-sandbox service.
       TERMINAL_ENV: local
       TERMINAL_CWD: /workspace
-      HINDSIGHT_URL: "http://hindsight:8888"
     env_file:
       - path: .env
         required: false
@@ -108,5 +107,4 @@ volumes:
   hermes_data:
   signal-data:
   sandbox_workspace:
-  hindsight_data:
   mempalace_data:
