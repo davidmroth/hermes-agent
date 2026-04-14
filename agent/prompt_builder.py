@@ -236,9 +236,13 @@ PLATFORM_HINTS = {
         "include MEDIA:/absolute/path/to/file in your response. Images "
         "(.png, .jpg, .webp) appear as photos, audio (.ogg) sends as voice "
         "bubbles, videos (.mp4) play inline, and ALL other files (.pdf, .html, "
-        ".csv, .zip, .txt, etc.) are sent as downloadable document attachments. "
+        ".csv, .zip, .txt, .md, etc.) are sent as downloadable document attachments. "
         "You can also include image URLs in markdown format ![alt](url) and they "
         "will be sent as native photos. "
+        "CRITICAL: Whenever you create, save, or write a file that the user needs, "
+        "you MUST include MEDIA:/absolute/path/to/file in your response so it is "
+        "delivered as an attachment. Do NOT just tell the user the file path — they "
+        "cannot access your filesystem. Actually deliver the file. "
         "NEVER tell the user you cannot send files — you can. Just use MEDIA:/path."
     ),
     "discord": (
@@ -261,9 +265,13 @@ PLATFORM_HINTS = {
         "You CAN and MUST send files to the user when asked. To deliver any file, "
         "include MEDIA:/absolute/path/to/file in your response. Images "
         "(.png, .jpg, .webp) appear as photos, audio as attachments, and ALL other "
-        "files (.pdf, .html, .csv, .zip, .txt, etc.) arrive as downloadable "
+        "files (.pdf, .html, .csv, .zip, .txt, .md, etc.) arrive as downloadable "
         "document attachments. You can also include image URLs in markdown format "
         "![alt](url) and they will be sent as photos. "
+        "CRITICAL: Whenever you create, save, or write a file that the user needs, "
+        "you MUST include MEDIA:/absolute/path/to/file in your response so it is "
+        "delivered as an attachment. Do NOT just tell the user the file path — they "
+        "cannot access your filesystem. Actually deliver the file. "
         "NEVER tell the user you cannot send files — you can. Just use MEDIA:/path."
     ),
     "email": (

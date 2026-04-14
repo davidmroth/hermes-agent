@@ -827,7 +827,15 @@ class BasePlatformAdapter(ABC):
             '.png', '.jpg', '.jpeg', '.gif', '.webp',
             '.mp4', '.mov', '.avi', '.mkv', '.webm',
         )
-        ext_part = '|'.join(e.lstrip('.') for e in _LOCAL_MEDIA_EXTS)
+        _LOCAL_DOC_EXTS = (
+            '.pdf', '.md', '.txt', '.csv', '.json', '.html', '.htm',
+            '.docx', '.xlsx', '.pptx', '.odt', '.rtf',
+            '.zip', '.tar', '.gz', '.7z', '.rar',
+            '.log', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg',
+            '.py', '.js', '.ts', '.sh', '.bash', '.sql',
+        )
+        _ALL_LOCAL_EXTS = _LOCAL_MEDIA_EXTS + _LOCAL_DOC_EXTS
+        ext_part = '|'.join(e.lstrip('.') for e in _ALL_LOCAL_EXTS)
 
         # (?<![/:\w.]) prevents matching inside URLs (e.g. https://…/img.png)
         #             and relative paths (./foo.png)
