@@ -1173,17 +1173,6 @@ def _load_mcp_config() -> Dict[str, dict]:
         if not servers or not isinstance(servers, dict):
             servers = {}
             
-        # Auto-inject MemPalace MCP server if installed (unless user explicitly configured it)
-        try:
-            import importlib.util
-            if "mempalace" not in servers and importlib.util.find_spec("mempalace"):
-                servers["mempalace"] = {
-                    "command": "python",
-                    "args": ["-m", "mempalace.mcp_server"]
-                }
-        except Exception as exc:
-            logger.debug("Failed to check for mempalace installation: %s", exc)
-            
         if not servers:
             return {}
         # Ensure .env vars are available for interpolation
