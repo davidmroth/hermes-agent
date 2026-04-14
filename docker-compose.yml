@@ -61,6 +61,7 @@ services:
       - ./cron:/opt/hermes/cron
       - ./skills:/opt/hermes/skills
       - ./optional-skills:/opt/hermes/optional-skills
+      - .data/hermes_home:/root
       - mempalace_data:/root/.mempalace
     stdin_open: true
     tty: true

@@ -23,9 +23,6 @@ services:
     depends_on:
       camofox:
         condition: service_healthy
-    networks:
-      - default
-      - agentlens_default
 
   signal:
     #ports:
@@ -87,6 +84,6 @@ services:
         max-file: "3"
         max-size: "10m"
 
-networks:
-  agentlens_default:
-    external: true
+#networks:
+#  agentlens_default:
+#    external: true
