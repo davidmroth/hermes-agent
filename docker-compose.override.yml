@@ -87,3 +87,17 @@ services:
 #networks:
 #  agentlens_default:
 #    external: true
+
+  hermes-hud:
+    build:
+      context: ../hermes-hud
+      dockerfile: Dockerfile
+    profiles:
+      - hud
+    environment:
+      - HERMES_HOME=/opt/data
+    volumes:
+      - .data/hermes:/opt/data
+      - ../hermes-hud:/opt/hermes-hud
+    stdin_open: true
+    tty: true
