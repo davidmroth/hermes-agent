@@ -12,8 +12,11 @@ import logging
 import mimetypes
 import os
 import re
+import socket
 import ssl
 import time
+import uuid
+from datetime import datetime, timezone
 
 from agent.redact import redact_sensitive_text
 
@@ -922,6 +925,34 @@ def _encode_webchat_attachment(file_path):
     }
 
 
+def _build_webchat_sender_trace(route_name, base_url, chat_id, attachments, message):
+    session_platform = ""
+    session_chat_id = ""
+
+    try:
+        from gateway.session_context import get_session_env
+
+        session_platform = get_session_env("HERMES_SESSION_PLATFORM", "")
+        session_chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "")
+    except Exception:
+        session_platform = os.getenv("HERMES_SESSION_PLATFORM", "")
+        session_chat_id = os.getenv("HERMES_SESSION_CHAT_ID", "")
+
+    return {
+        "traceId": str(uuid.uuid4()),
+        "route": route_name,
+        "senderBaseUrl": base_url,
+        "senderTargetUrl": f"{base_url}/api/internal/hermes/conversations/{chat_id}/assistant",
+        "senderHostname": socket.gethostname(),
+        "sessionPlatform": session_platform or None,
+        "sessionChatId": session_chat_id or None,
+        "attachmentCount": len(attachments),
+        "attachmentNames": [attachment.get("fileName", "attachment") for attachment in attachments],
+        "contentLength": len(message or ""),
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def _send_webchat(token, extra, chat_id, message, thread_id=None, media_files=None):
     """Send a single assistant message to the web UI service."""
     try:
@@ -961,6 +992,9 @@ async def _send_webchat(token, extra, chat_id, message, thread_id=None, media_fi
     if attachments:
         payload["attachments"] = attachments
 
+    sender_trace = _build_webchat_sender_trace("send_message_tool", base_url, chat_id, attachments, message)
+    payload["senderTrace"] = sender_trace
+
     headers = {"Authorization": f"Bearer {service_token}"}
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -972,12 +1006,18 @@ async def _send_webchat(token, extra, chat_id, message, thread_id=None, media_fi
             "platform": "webchat",
             "chat_id": chat_id,
             "message_id": data.get("messageId") or data.get("id"),
+            "sender_trace_id": sender_trace["traceId"],
+            "sender_target_url": sender_trace["senderTargetUrl"],
         }
         if warnings:
             result["warnings"] = warnings
         return result
     except Exception as e:
-        return {"error": f"Webchat send failed: {e}"}
+        return {
+            "error": f"Webchat send failed: {e}",
+            "sender_trace_id": sender_trace["traceId"],
+            "sender_target_url": sender_trace["senderTargetUrl"],
+        }
 
 
 async def _send_email(extra, chat_id, message):

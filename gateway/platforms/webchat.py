@@ -12,9 +12,11 @@ import base64
 import logging
 import mimetypes
 import os
+import socket
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 try:
     import httpx
@@ -70,6 +72,39 @@ class WebChatAdapter(BasePlatformAdapter):
     def _assistant_url(self, chat_id: str) -> str:
         return f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/assistant"
 
+    def _build_sender_trace(
+        self,
+        chat_id: str,
+        content: str,
+        attachments: Optional[list[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        session_platform = ""
+        session_chat_id = ""
+
+        try:
+            from gateway.session_context import get_session_env
+
+            session_platform = get_session_env("HERMES_SESSION_PLATFORM", "")
+            session_chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "")
+        except Exception:
+            session_platform = os.getenv("HERMES_SESSION_PLATFORM", "")
+            session_chat_id = os.getenv("HERMES_SESSION_CHAT_ID", "")
+
+        attachment_list = attachments or []
+        return {
+            "traceId": str(uuid4()),
+            "route": "webchat_adapter",
+            "senderBaseUrl": self._base_url,
+            "senderTargetUrl": self._assistant_url(chat_id),
+            "senderHostname": socket.gethostname(),
+            "sessionPlatform": session_platform or None,
+            "sessionChatId": session_chat_id or None,
+            "attachmentCount": len(attachment_list),
+            "attachmentNames": [str(attachment.get("fileName") or "attachment") for attachment in attachment_list],
+            "contentLength": len(content or ""),
+            "startedAt": f"{datetime.utcnow().isoformat()}Z",
+        }
+
     async def _post_assistant_message(
         self,
         chat_id: str,
@@ -101,6 +136,8 @@ class WebChatAdapter(BasePlatformAdapter):
                 metadata = {k: v for k, v in metadata.items() if k != "timings"}
             if metadata:
                 payload["metadata"] = metadata
+
+        payload["senderTrace"] = self._build_sender_trace(chat_id, content, attachments)
 
         response = await self._client.post(
             self._assistant_url(chat_id),

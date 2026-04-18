@@ -456,6 +456,12 @@ class TestSendWebchatMediaDelivery:
         assert captured["json"]["attachments"][0]["fileName"] == "artifact.md"
         assert captured["json"]["attachments"][0]["contentType"] == "text/markdown"
         assert captured["json"]["attachments"][0]["base64Data"]
+        assert captured["json"]["senderTrace"]["route"] == "send_message_tool"
+        assert captured["json"]["senderTrace"]["senderTargetUrl"] == captured["url"]
+        assert captured["json"]["senderTrace"]["attachmentCount"] == 1
+        assert captured["json"]["senderTrace"]["attachmentNames"] == ["artifact.md"]
+        assert result["sender_target_url"] == captured["url"]
+        assert result["sender_trace_id"] == captured["json"]["senderTrace"]["traceId"]
 
     def test_send_to_platform_routes_webchat_media_to_last_chunk(self):
         sent_calls = []

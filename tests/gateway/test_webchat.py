@@ -104,6 +104,10 @@ async def test_send_document_posts_json_attachment(tmp_path):
     assert posted["json"]["attachments"][0]["fileName"] == "final-report.md"
     assert posted["json"]["attachments"][0]["contentType"] == "text/markdown"
     assert posted["json"]["attachments"][0]["base64Data"]
+    assert posted["json"]["senderTrace"]["route"] == "webchat_adapter"
+    assert posted["json"]["senderTrace"]["senderTargetUrl"] == posted["url"]
+    assert posted["json"]["senderTrace"]["attachmentCount"] == 1
+    assert posted["json"]["senderTrace"]["attachmentNames"] == ["final-report.md"]
 
 
 @pytest.mark.asyncio
