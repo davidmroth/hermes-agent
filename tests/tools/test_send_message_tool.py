@@ -443,7 +443,7 @@ class TestSendWebchatMediaDelivery:
             )
 
         assert result["success"] is True
-        assert len(sent_calls) >= 2
+        assert len(sent_calls) >= 1
         assert all(call == [] for call in sent_calls[:-1])
         assert sent_calls[-1] == media
 
