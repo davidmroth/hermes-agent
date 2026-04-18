@@ -24,23 +24,6 @@ services:
       camofox:
         condition: service_healthy
 
-  signal:
-    #ports:
-    #  - "8081:8080" # ← optional: expose to host for manual testing / linking
-    environment:
-      - MODE=json-rpc # crucial: enables JSON-RPC daemon
-      - PORT=8080
-      # - SWAGGER_HOST=localhost:8081
-      # Note: SIGNAL_CLI_OPTS flags (--ignore-stickers, --send-receipts) are
-      # from the old bbernhard REST API wrapper and not supported by the
-      # native ghcr.io/asamk/signal-cli image.
-    healthcheck:
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8080"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 15s
-
   # ---------------------------------------------------------------------------
   # Camofox — Local anti-detection browser (Firefox/Camoufox)
   # Provides browser automation with C++ fingerprint spoofing.
