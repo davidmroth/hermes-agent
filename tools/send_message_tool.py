@@ -245,7 +245,14 @@ def _handle_send(args):
         if not chat_id and platform_name == "webchat":
             recent_target = _resolve_recent_session_target(platform_name)
             if recent_target:
-                chat_id, thread_id, _ = _parse_target_ref(platform_name, recent_target)
+                parsed_chat_id, parsed_thread_id, _ = _parse_target_ref(platform_name, recent_target)
+                if parsed_chat_id:
+                    chat_id = parsed_chat_id
+                    thread_id = parsed_thread_id
+                elif ":" in recent_target:
+                    chat_id, thread_id = recent_target.split(":", 1)
+                else:
+                    chat_id = recent_target
 
         home = config.get_home_channel(platform)
         if not chat_id and home:
