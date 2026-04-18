@@ -1776,11 +1776,18 @@ class BasePlatformAdapter(ABC):
                 # Send the text portion
                 if text_content:
                     logger.info("[%s] Sending response (%d chars) to %s", self.name, len(text_content), event.source.chat_id)
+                    # Merge per-event timings (set by gateway after the agent
+                    # turn completes) into metadata. Adapters that don't
+                    # recognize ``timings`` simply ignore it.
+                    _send_metadata = dict(_thread_metadata) if _thread_metadata else {}
+                    _ev_timings = getattr(event, "_hermes_timings", None)
+                    if _ev_timings:
+                        _send_metadata["timings"] = _ev_timings
                     result = await self._send_with_retry(
                         chat_id=event.source.chat_id,
                         content=text_content,
                         reply_to=event.message_id,
-                        metadata=_thread_metadata,
+                        metadata=_send_metadata or None,
                     )
                     _record_delivery(result)
 

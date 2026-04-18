@@ -120,3 +120,61 @@ async def test_send_document_returns_retryable_error_when_post_fails(tmp_path):
     assert result.success is False
     assert result.retryable is True
     assert "Webchat file send failed" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_send_lifts_timings_metadata_to_top_level_payload():
+    """Webchat adapter should hoist llama.cpp timings out of metadata."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-42"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    timings = {
+        "prompt_n": 12,
+        "prompt_ms": 34.5,
+        "predicted_n": 7,
+        "predicted_ms": 89.0,
+        "cache_n": 0,
+    }
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="Hi there",
+        metadata={"thread_id": "t-1", "timings": timings},
+    )
+
+    assert result.success is True
+    assert posted["json"]["content"] == "Hi there"
+    # timings hoisted to top-level
+    assert posted["json"]["timings"] == timings
+    # metadata retained but timings stripped
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_omits_timings_when_metadata_only_has_timings():
+    """When metadata contained only timings, no metadata key is posted."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-43"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    await adapter.send(
+        chat_id="conv-1",
+        content="Hello",
+        metadata={"timings": {"prompt_n": 1, "prompt_ms": 2.0,
+                              "predicted_n": 3, "predicted_ms": 4.0}},
+    )
+
+    assert posted["json"]["timings"]["prompt_n"] == 1
+    assert "metadata" not in posted["json"]

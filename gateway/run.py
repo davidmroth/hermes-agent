@@ -4196,6 +4196,17 @@ class GatewayRunner:
                         )
                 return None
 
+            # Attach llama.cpp-style timings to the event so platform adapters
+            # (currently only webchat) can surface them to the UI alongside the
+            # final assistant message. Adapters that don't recognize the field
+            # silently ignore it.
+            try:
+                _timings = agent_result.get("timings")
+                if _timings:
+                    setattr(event, "_hermes_timings", _timings)
+            except Exception:
+                pass
+
             return response
             
         except Exception as e:

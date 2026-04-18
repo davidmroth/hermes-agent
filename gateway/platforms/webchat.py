@@ -91,7 +91,16 @@ class WebChatAdapter(BasePlatformAdapter):
         if reply_to:
             payload["replyToMessageId"] = reply_to
         if metadata:
-            payload["metadata"] = metadata
+            # Lift llama.cpp-style timings to a top-level field so the web UI
+            # can store them in the dedicated ``messages.timings`` JSON column
+            # without having to crack open ``metadata`` on the read path.
+            timings = metadata.get("timings") if isinstance(metadata, dict) else None
+            if timings:
+                payload["timings"] = timings
+                # Don't double-send inside metadata.
+                metadata = {k: v for k, v in metadata.items() if k != "timings"}
+            if metadata:
+                payload["metadata"] = metadata
 
         response = await self._client.post(
             self._assistant_url(chat_id),
