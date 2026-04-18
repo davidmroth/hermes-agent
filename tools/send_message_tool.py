@@ -242,6 +242,11 @@ def _handle_send(args):
         if platform_name == current_platform and current_chat_id:
             chat_id = current_chat_id
 
+        if not chat_id and platform_name == "webchat":
+            recent_target = _resolve_recent_session_target(platform_name)
+            if recent_target:
+                chat_id, thread_id, _ = _parse_target_ref(platform_name, recent_target)
+
         home = config.get_home_channel(platform)
         if not chat_id and home:
             chat_id = home.chat_id
@@ -333,6 +338,41 @@ def _describe_media_for_mirror(media_files):
             return "[Sent audio attachment]"
         return "[Sent document attachment]"
     return f"[Sent {len(media_files)} media attachments]"
+
+
+def _resolve_recent_session_target(platform_name: str) -> str | None:
+    """Return the most recently updated target seen for a platform."""
+    try:
+        from hermes_cli.config import get_hermes_home
+
+        sessions_path = get_hermes_home() / "sessions" / "sessions.json"
+        if not sessions_path.exists():
+            return None
+
+        with open(sessions_path, encoding="utf-8") as handle:
+            sessions = json.load(handle)
+
+        best_target = None
+        best_updated_at = ""
+        for session in sessions.values():
+            origin = session.get("origin") or {}
+            if origin.get("platform") != platform_name:
+                continue
+
+            chat_id = origin.get("chat_id")
+            if not chat_id:
+                continue
+
+            thread_id = origin.get("thread_id")
+            target = f"{chat_id}:{thread_id}" if thread_id else str(chat_id)
+            updated_at = str(session.get("updated_at") or session.get("created_at") or "")
+            if updated_at >= best_updated_at:
+                best_updated_at = updated_at
+                best_target = target
+
+        return best_target
+    except Exception:
+        return None
 
 
 def _get_cron_auto_delivery_target():

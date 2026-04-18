@@ -375,6 +375,42 @@ class TestSendMessageTool:
             media_files=[],
         )
 
+    def test_webchat_uses_recent_session_when_no_home_channel(self):
+        from gateway.config import PlatformConfig
+
+        webchat_cfg = PlatformConfig(enabled=True, token="svc-token", extra={"url": "http://webui:3000"})
+        config = SimpleNamespace(
+            platforms={Platform.WEBCHAT: webchat_cfg},
+            get_home_channel=lambda _platform: None,
+        )
+
+        with patch("gateway.config.load_gateway_config", return_value=config), \
+             patch("tools.interrupt.is_interrupted", return_value=False), \
+             patch("model_tools._run_async", side_effect=_run_async_immediately), \
+             patch("gateway.session_context.get_session_env", return_value=""), \
+             patch("tools.send_message_tool._resolve_recent_session_target", return_value="conv-recent"), \
+             patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock, \
+             patch("gateway.mirror.mirror_to_session", return_value=True):
+            result = json.loads(
+                send_message_tool(
+                    {
+                        "action": "send",
+                        "target": "webchat",
+                        "message": "hello",
+                    }
+                )
+            )
+
+        assert result["success"] is True
+        send_mock.assert_awaited_once_with(
+            Platform.WEBCHAT,
+            webchat_cfg,
+            "conv-recent",
+            "hello",
+            thread_id=None,
+            media_files=[],
+        )
+
 
 class TestSendWebchatMediaDelivery:
     def test_send_webchat_includes_media_attachment(self, tmp_path, monkeypatch):
