@@ -456,6 +456,12 @@ def _get_enabled_platforms() -> List[str]:
         enabled.append("whatsapp")
     if get_env_value("QQ_APP_ID"):
         enabled.append("qqbot")
+    if (
+        get_env_value("WEBCHAT_SERVICE_TOKEN")
+        or get_env_value("WEBCHAT_URL")
+        or get_env_value("WEBCHAT_ENABLED")
+    ):
+        enabled.append("webchat")
     return enabled
 
 
