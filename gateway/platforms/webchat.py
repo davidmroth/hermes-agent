@@ -27,6 +27,7 @@ from gateway.platforms.base import (
     BasePlatformAdapter,
     MessageEvent,
     MessageType,
+    ProcessingOutcome,
     SendResult,
     cache_audio_from_bytes,
     cache_document_from_bytes,
@@ -128,6 +129,7 @@ class WebChatAdapter(BasePlatformAdapter):
         event_id = payload.get("eventId")
         if not event_id:
             return None
+        logger.debug("[%s] Dequeued event %s", self.name, event_id)
 
         media_urls, media_types = await self._materialize_attachments(payload.get("attachments") or [])
         message_type = self._derive_message_type(payload.get("text", ""), media_types)
@@ -148,7 +150,6 @@ class WebChatAdapter(BasePlatformAdapter):
             except ValueError:
                 pass
 
-        await self._ack_event(event_id)
         return MessageEvent(
             text=payload.get("text", ""),
             message_type=message_type,
@@ -211,8 +212,26 @@ class WebChatAdapter(BasePlatformAdapter):
     async def _ack_event(self, event_id: str) -> None:
         if self._client is None:
             return
+        logger.debug("[%s] Acknowledging event %s", self.name, event_id)
         response = await self._client.post(f"{self._base_url}/api/internal/hermes/events/{event_id}/ack", headers=self._headers())
         response.raise_for_status()
+
+    async def on_processing_complete(self, event: MessageEvent, outcome: ProcessingOutcome) -> None:
+        payload = event.raw_message if isinstance(event.raw_message, dict) else {}
+        event_id = payload.get("eventId")
+        if not event_id:
+            return
+
+        if outcome is not ProcessingOutcome.SUCCESS:
+            logger.warning(
+                "[%s] Leaving event %s unacked after %s so it can be retried",
+                self.name,
+                event_id,
+                outcome.value,
+            )
+            return
+
+        await self._ack_event(str(event_id))
 
     async def send(
         self,
