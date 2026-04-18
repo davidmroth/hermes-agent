@@ -8,6 +8,7 @@ messages back to the web UI over authenticated HTTP.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import mimetypes
 import os
@@ -65,6 +66,53 @@ class WebChatAdapter(BasePlatformAdapter):
         if self._service_token:
             headers["Authorization"] = f"Bearer {self._service_token}"
         return headers
+
+    def _assistant_url(self, chat_id: str) -> str:
+        return f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/assistant"
+
+    async def _post_assistant_message(
+        self,
+        chat_id: str,
+        content: str = "",
+        attachments: Optional[list[Dict[str, Any]]] = None,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        if self._client is None:
+            return SendResult(success=False, error="Webchat adapter is not connected")
+
+        payload: Dict[str, Any] = {
+            "conversationId": chat_id,
+            "content": content,
+            "publicBaseUrl": self._public_base_url,
+        }
+        if attachments:
+            payload["attachments"] = attachments
+        if reply_to:
+            payload["replyToMessageId"] = reply_to
+        if metadata:
+            payload["metadata"] = metadata
+
+        response = await self._client.post(
+            self._assistant_url(chat_id),
+            json=payload,
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        data = response.json()
+        return SendResult(success=True, message_id=str(data.get("messageId") or data.get("id") or ""), raw_response=data)
+
+    @staticmethod
+    def _build_json_attachment(file_path: str, file_name: Optional[str] = None) -> Dict[str, Any]:
+        resolved_path = Path(file_path)
+        attachment_name = file_name or resolved_path.name
+        content_type = mimetypes.guess_type(attachment_name)[0] or "application/octet-stream"
+        encoded = base64.b64encode(resolved_path.read_bytes()).decode("ascii")
+        return {
+            "fileName": attachment_name,
+            "contentType": content_type,
+            "base64Data": encoded,
+        }
 
     async def connect(self) -> bool:
         if not HTTPX_AVAILABLE:
@@ -240,52 +288,30 @@ class WebChatAdapter(BasePlatformAdapter):
         reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
-        if self._client is None:
-            return SendResult(success=False, error="Webchat adapter is not connected")
-
-        payload: Dict[str, Any] = {
-            "conversationId": chat_id,
-            "content": content,
-            "publicBaseUrl": self._public_base_url,
-        }
-        if reply_to:
-            payload["replyToMessageId"] = reply_to
-        if metadata:
-            payload["metadata"] = metadata
-
         try:
-            response = await self._client.post(
-                f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/assistant",
-                json=payload,
-                headers=self._headers(),
+            return await self._post_assistant_message(
+                chat_id=chat_id,
+                content=content,
+                reply_to=reply_to,
+                metadata=metadata,
             )
-            response.raise_for_status()
-            data = response.json()
-            return SendResult(success=True, message_id=str(data.get("messageId") or data.get("id") or ""), raw_response=data)
         except Exception as exc:
             return SendResult(success=False, error=f"Webchat send failed: {exc}", retryable=True)
 
-    async def _send_file(self, chat_id: str, file_path: str, caption: Optional[str] = None) -> SendResult:
-        if self._client is None:
-            return SendResult(success=False, error="Webchat adapter is not connected")
-
+    async def _send_file(
+        self,
+        chat_id: str,
+        file_path: str,
+        caption: Optional[str] = None,
+        file_name: Optional[str] = None,
+    ) -> SendResult:
         try:
-            file_name = Path(file_path).name
-            content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-            with open(file_path, "rb") as handle:
-                files = {
-                    "attachments": (file_name, handle.read(), content_type),
-                }
-            data = {"content": caption or ""}
-            response = await self._client.post(
-                f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/assistant",
-                data=data,
-                files=files,
-                headers={"Authorization": self._headers().get("Authorization", "")},
+            attachment = self._build_json_attachment(file_path, file_name=file_name)
+            return await self._post_assistant_message(
+                chat_id=chat_id,
+                content=caption or "",
+                attachments=[attachment],
             )
-            response.raise_for_status()
-            payload = response.json()
-            return SendResult(success=True, message_id=str(payload.get("messageId") or payload.get("id") or ""), raw_response=payload)
         except Exception as exc:
             return SendResult(success=False, error=f"Webchat file send failed: {exc}", retryable=True)
 
@@ -298,7 +324,7 @@ class WebChatAdapter(BasePlatformAdapter):
         reply_to: Optional[str] = None,
         **kwargs,
     ) -> SendResult:
-        return await self._send_file(chat_id, file_path, caption)
+        return await self._send_file(chat_id, file_path, caption, file_name=file_name)
 
     async def send_image_file(
         self,
