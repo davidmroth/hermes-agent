@@ -52,6 +52,7 @@ services:
       - ./hermes_state.py:/opt/hermes/hermes_state.py
       - ./hermes_time.py:/opt/hermes/hermes_time.py
       - ./hermes_constants.py:/opt/hermes/hermes_constants.py
+      - ./hermes_logging.py:/opt/hermes/hermes_logging.py
       - ./toolset_distributions.py:/opt/hermes/toolset_distributions.py
       - ./utils.py:/opt/hermes/utils.py
       - ./agent:/opt/hermes/agent
