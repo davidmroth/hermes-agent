@@ -130,6 +130,7 @@ def _handle_send(args):
         "slack": Platform.SLACK,
         "whatsapp": Platform.WHATSAPP,
         "signal": Platform.SIGNAL,
+        "webchat": Platform.WEBCHAT,
         "matrix": Platform.MATRIX,
         "mattermost": Platform.MATTERMOST,
         "homeassistant": Platform.HOMEASSISTANT,
@@ -364,6 +365,8 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             result = await _send_whatsapp(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SIGNAL:
             result = await _send_signal(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])
+        elif platform == Platform.WEBCHAT:
+            result = await _send_webchat(pconfig.token, pconfig.extra, chat_id, chunk, thread_id=thread_id)
         elif platform == Platform.EMAIL:
             result = await _send_email(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SMS:
@@ -622,6 +625,43 @@ async def _send_signal(extra, chat_id, message, media_files=None):
             return {"success": True, "platform": "signal", "chat_id": chat_id}
     except Exception as e:
         return {"error": f"Signal send failed: {e}"}
+
+
+async def _send_webchat(token, extra, chat_id, message, thread_id=None):
+    """Send a single assistant message to the web UI service."""
+    try:
+        import httpx
+    except ImportError:
+        return {"error": "httpx not installed"}
+
+    base_url = (extra.get("url") or os.getenv("WEBCHAT_URL", "")).rstrip("/")
+    service_token = token or os.getenv("WEBCHAT_SERVICE_TOKEN", "")
+    if not base_url:
+        return {"error": "Webchat not configured. Set WEBCHAT_URL."}
+    if not service_token:
+        return {"error": "Webchat not configured. Set WEBCHAT_SERVICE_TOKEN."}
+
+    payload = {
+        "conversationId": chat_id,
+        "content": message,
+    }
+    if thread_id:
+        payload["threadId"] = thread_id
+
+    headers = {"Authorization": f"Bearer {service_token}"}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{base_url}/api/internal/hermes/conversations/{chat_id}/assistant", json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+        return {
+            "success": True,
+            "platform": "webchat",
+            "chat_id": chat_id,
+            "message_id": data.get("messageId") or data.get("id"),
+        }
+    except Exception as e:
+        return {"error": f"Webchat send failed: {e}"}
 
 
 async def _send_email(extra, chat_id, message):

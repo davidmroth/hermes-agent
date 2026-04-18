@@ -274,6 +274,12 @@ PLATFORM_HINTS = {
         "cannot access your filesystem. Actually deliver the file. "
         "NEVER tell the user you cannot send files — you can. Just use MEDIA:/path."
     ),
+    "webchat": (
+        "You are in a browser-based messaging interface that behaves like a direct chat channel. "
+        "Use concise markdown-friendly responses and assume the user can scroll conversation history, "
+        "see streaming updates, and revisit prior messages later. When you create files for the user, "
+        "reference them naturally, but do not assume direct filesystem access from the browser."
+    ),
     "email": (
         "You are communicating via email. Write clear, well-structured responses "
         "suitable for email. Use plain text formatting (no markdown). "
