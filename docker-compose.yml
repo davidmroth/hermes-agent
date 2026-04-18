@@ -97,5 +97,4 @@ services:
 
 volumes:
   hermes_data:
-  signal-data:
   sandbox_workspace:
