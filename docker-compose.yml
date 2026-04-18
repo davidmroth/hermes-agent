@@ -95,15 +95,6 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  signal:
-    image: ghcr.io/asamk/signal-cli:latest
-    container_name: signal
-    restart: always
-    command:
-      ["--config", "/var/lib/signal-cli", "daemon", "--http", "0.0.0.0:8080"]
-    volumes:
-      - .data/signal:/var/lib/signal-cli
-
 volumes:
   hermes_data:
   signal-data:
