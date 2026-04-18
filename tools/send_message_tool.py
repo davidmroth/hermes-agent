@@ -6,8 +6,10 @@ human-friendly channel names to IDs. Works in both CLI and gateway contexts.
 """
 
 import asyncio
+import base64
 import json
 import logging
+import mimetypes
 import os
 import re
 import ssl
@@ -121,7 +123,7 @@ SEND_MESSAGE_SCHEMA = {
             "media_paths": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional list of absolute file paths to attach to the message (e.g. ['/path/to/report.pdf']). Currently supported for Telegram, Discord, Matrix, Signal, and Weixin."
+                "description": "Optional list of absolute file paths to attach to the message (e.g. ['/path/to/report.pdf']). Currently supported for Telegram, Discord, Matrix, Signal, Weixin, and Webchat."
             }
         },
         "required": []
@@ -233,11 +235,18 @@ def _handle_send(args):
 
     used_home_channel = False
     if not chat_id:
+        from gateway.session_context import get_session_env
+
+        current_platform = get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower()
+        current_chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "").strip()
+        if platform_name == current_platform and current_chat_id:
+            chat_id = current_chat_id
+
         home = config.get_home_channel(platform)
-        if home:
+        if not chat_id and home:
             chat_id = home.chat_id
             used_home_channel = True
-        else:
+        elif not chat_id:
             return json.dumps({
                 "error": f"No home channel set for {platform_name} to determine where to send the message. "
                 f"Either specify a channel directly with '{platform_name}:CHANNEL_NAME', "
@@ -482,11 +491,28 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             last_result = result
         return last_result
 
+    if platform == Platform.WEBCHAT:
+        last_result = None
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            result = await _send_webchat(
+                pconfig.token,
+                pconfig.extra,
+                chat_id,
+                chunk,
+                thread_id=thread_id,
+                media_files=media_files if is_last else [],
+            )
+            if isinstance(result, dict) and result.get("error"):
+                return result
+            last_result = result
+        return last_result
+
     # --- Other platforms ---
     if media_files and not message.strip() and platform != Platform.SIGNAL:
         return {
             "error": (
-                f"send_message MEDIA delivery is currently only supported for telegram, discord, matrix, signal, and weixin; "
+                f"send_message MEDIA delivery is currently only supported for telegram, discord, matrix, signal, weixin, and webchat; "
                 f"target {platform.value} had only media attachments"
             )
         }
@@ -494,7 +520,7 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     if media_files and platform != Platform.SIGNAL:
         warning = (
             f"MEDIA attachments were omitted for {platform.value}; "
-            "native send_message media delivery is currently only supported for telegram, discord, matrix, signal, and weixin"
+            "native send_message media delivery is currently only supported for telegram, discord, matrix, signal, weixin, and webchat"
         )
 
     last_result = None
@@ -506,8 +532,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             result = await _send_whatsapp(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SIGNAL:
             result = await _send_signal(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])
-        elif platform == Platform.WEBCHAT:
-            result = await _send_webchat(pconfig.token, pconfig.extra, chat_id, chunk, thread_id=thread_id)
         elif platform == Platform.EMAIL:
             result = await _send_email(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SMS:
@@ -839,7 +863,19 @@ async def _send_signal(extra, chat_id, message, media_files=None):
         return _error(f"Signal send failed: {e}")
 
 
-async def _send_webchat(token, extra, chat_id, message, thread_id=None):
+def _encode_webchat_attachment(file_path):
+    file_name = os.path.basename(file_path)
+    content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    with open(file_path, "rb") as handle:
+        encoded = base64.b64encode(handle.read()).decode("ascii")
+    return {
+        "fileName": file_name,
+        "contentType": content_type,
+        "base64Data": encoded,
+    }
+
+
+async def _send_webchat(token, extra, chat_id, message, thread_id=None, media_files=None):
     """Send a single assistant message to the web UI service."""
     try:
         import httpx
@@ -860,18 +896,39 @@ async def _send_webchat(token, extra, chat_id, message, thread_id=None):
     if thread_id:
         payload["threadId"] = thread_id
 
+    attachments = []
+    warnings = []
+    for media_path, _is_voice in (media_files or []):
+        if not os.path.exists(media_path):
+            warning = f"Media file not found, skipping: {media_path}"
+            logger.warning(warning)
+            warnings.append(warning)
+            continue
+        try:
+            attachments.append(_encode_webchat_attachment(media_path))
+        except Exception as e:
+            warning = _sanitize_error_text(f"Failed to attach media {media_path}: {e}")
+            logger.warning(warning)
+            warnings.append(warning)
+
+    if attachments:
+        payload["attachments"] = attachments
+
     headers = {"Authorization": f"Bearer {service_token}"}
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(f"{base_url}/api/internal/hermes/conversations/{chat_id}/assistant", json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
-        return {
+        result = {
             "success": True,
             "platform": "webchat",
             "chat_id": chat_id,
             "message_id": data.get("messageId") or data.get("id"),
         }
+        if warnings:
+            result["warnings"] = warnings
+        return result
     except Exception as e:
         return {"error": f"Webchat send failed: {e}"}
 

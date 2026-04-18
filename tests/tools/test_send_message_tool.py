@@ -14,6 +14,7 @@ from tools.send_message_tool import (
     _send_discord,
     _send_matrix_via_adapter,
     _send_telegram,
+    _send_webchat,
     _send_to_platform,
     send_message_tool,
 )
@@ -333,6 +334,118 @@ class TestSendMessageTool:
         assert "error" in result
         assert leaked not in result["error"]
         assert "access_token=***" in result["error"]
+
+    def test_webchat_uses_current_session_chat_without_home_channel(self):
+        from gateway.config import PlatformConfig
+
+        webchat_cfg = PlatformConfig(enabled=True, token="svc-token", extra={"url": "http://webui:3000"})
+        config = SimpleNamespace(
+            platforms={Platform.WEBCHAT: webchat_cfg},
+            get_home_channel=lambda _platform: None,
+        )
+
+        session_values = {
+            "HERMES_SESSION_PLATFORM": "webchat",
+            "HERMES_SESSION_CHAT_ID": "conv-123",
+        }
+
+        with patch("gateway.config.load_gateway_config", return_value=config), \
+             patch("tools.interrupt.is_interrupted", return_value=False), \
+             patch("model_tools._run_async", side_effect=_run_async_immediately), \
+             patch("gateway.session_context.get_session_env", side_effect=lambda name, default="": session_values.get(name, default)), \
+             patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock, \
+             patch("gateway.mirror.mirror_to_session", return_value=True):
+            result = json.loads(
+                send_message_tool(
+                    {
+                        "action": "send",
+                        "target": "webchat",
+                        "message": "hello",
+                    }
+                )
+            )
+
+        assert result["success"] is True
+        send_mock.assert_awaited_once_with(
+            Platform.WEBCHAT,
+            webchat_cfg,
+            "conv-123",
+            "hello",
+            thread_id=None,
+            media_files=[],
+        )
+
+
+class TestSendWebchatMediaDelivery:
+    def test_send_webchat_includes_media_attachment(self, tmp_path, monkeypatch):
+        media_path = tmp_path / "artifact.md"
+        media_path.write_text("# artifact\n", encoding="utf-8")
+
+        captured = {}
+
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"messageId": "msg-1"}
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, json=None, headers=None):
+                captured["url"] = url
+                captured["json"] = json
+                captured["headers"] = headers
+                return _Response()
+
+        monkeypatch.setitem(sys.modules, "httpx", SimpleNamespace(AsyncClient=lambda timeout=30.0: _Client()))
+
+        result = asyncio.run(
+            _send_webchat(
+                "svc-token",
+                {"url": "http://webui:3000"},
+                "conv-1",
+                "attached",
+                media_files=[(str(media_path), False)],
+            )
+        )
+
+        assert result["success"] is True
+        assert captured["url"] == "http://webui:3000/api/internal/hermes/conversations/conv-1/assistant"
+        assert captured["json"]["attachments"][0]["fileName"] == "artifact.md"
+        assert captured["json"]["attachments"][0]["contentType"] == "text/markdown"
+        assert captured["json"]["attachments"][0]["base64Data"]
+
+    def test_send_to_platform_routes_webchat_media_to_last_chunk(self):
+        sent_calls = []
+
+        async def fake_send(token, extra, chat_id, message, thread_id=None, media_files=None):
+            sent_calls.append(media_files or [])
+            return {"success": True, "platform": "webchat", "chat_id": chat_id, "message_id": str(len(sent_calls))}
+
+        long_msg = "word " * 2000
+        media = [("/tmp/file.md", False)]
+
+        with patch("tools.send_message_tool._send_webchat", fake_send):
+            result = asyncio.run(
+                _send_to_platform(
+                    Platform.WEBCHAT,
+                    SimpleNamespace(enabled=True, token="tok", extra={"url": "http://webui:3000"}),
+                    "conv-1",
+                    long_msg,
+                    media_files=media,
+                )
+            )
+
+        assert result["success"] is True
+        assert len(sent_calls) >= 2
+        assert all(call == [] for call in sent_calls[:-1])
+        assert sent_calls[-1] == media
 
 
 class TestSendTelegramMediaDelivery:
