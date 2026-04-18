@@ -11,7 +11,7 @@ services:
       - CAMOFOX_URL=http://camofox:9377
       # AgentLens observability
       - AGENTLENS_SERVER_URL=http://agentlens:8500
-      - PYTHONPATH=/opt/hermes:/opt/agentlens-sdk
+      - PYTHONPATH=/workspace:/opt/hermes:/opt/agentlens-sdk
     volumes:
       - .data/hermes:/opt/data
       # AgentLens SDK — makes `from sdk import AgentLensClient` work
