@@ -33,49 +33,13 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # ─── UI Helpers (shared with setup.py) ────────────────────────────────────────
 
-def _print_info(text: str):
-    print(color(f"  {text}", Colors.DIM))
-
-def _print_success(text: str):
-    print(color(f"✓ {text}", Colors.GREEN))
-
-def _print_warning(text: str):
-    print(color(f"⚠ {text}", Colors.YELLOW))
-
-def _print_error(text: str):
-    print(color(f"✗ {text}", Colors.RED))
-
-def _prompt(question: str, default: str = None, password: bool = False) -> str:
-    if default:
-        display = f"{question} [{default}]: "
-    else:
-        display = f"{question}: "
-    try:
-        if password:
-            import getpass
-            value = getpass.getpass(color(display, Colors.YELLOW))
-        else:
-            value = input(color(display, Colors.YELLOW))
-        return value.strip() or default or ""
-    except (KeyboardInterrupt, EOFError):
-        print()
-        return default or ""
-
-def _prompt_yes_no(question: str, default: bool = True) -> bool:
-    default_str = "Y/n" if default else "y/N"
-    while True:
-        try:
-            value = input(color(f"{question} [{default_str}]: ", Colors.YELLOW)).strip().lower()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            return default
-        if not value:
-            return default
-        if value in ('y', 'yes'):
-            return True
-        if value in ('n', 'no'):
-            return False
-
+from hermes_cli.cli_output import (  # noqa: E402 — late import block
+    print_error as _print_error,
+    print_info as _print_info,
+    print_success as _print_success,
+    print_warning as _print_warning,
+    prompt as _prompt,
+)
 
 # ─── Toolset Registry ─────────────────────────────────────────────────────────
 
@@ -99,6 +63,7 @@ CONFIGURABLE_TOOLSETS = [
     ("clarify",         "❓ Clarifying Questions",      "clarify"),
     ("delegation",      "👥 Task Delegation",           "delegate_task"),
     ("cronjob",         "⏰ Cron Jobs",                 "create/list/update/pause/resume/run, with optional attached skills"),
+    ("messaging",       "📨 Cross-Platform Messaging",  "send_message"),
     ("rl",              "🧪 RL Training",               "Tinker-Atropos training tools"),
     ("homeassistant",    "🏠 Home Assistant",           "smart home device control"),
 ]
@@ -134,23 +99,14 @@ def _get_plugin_toolset_keys() -> set:
     except Exception:
         return set()
 
-# Platform display config
+# Platform display config — derived from the canonical registry so every
+# module shares the same data.  Kept as dict-of-dicts for backward
+# compatibility with existing ``PLATFORMS[key]["label"]`` access patterns.
+from hermes_cli.platforms import PLATFORMS as _PLATFORMS_REGISTRY
+
 PLATFORMS = {
-    "cli":      {"label": "🖥️  CLI",       "default_toolset": "hermes-cli"},
-    "telegram": {"label": "📱 Telegram",   "default_toolset": "hermes-telegram"},
-    "discord":  {"label": "💬 Discord",    "default_toolset": "hermes-discord"},
-    "slack":    {"label": "💼 Slack",      "default_toolset": "hermes-slack"},
-    "whatsapp": {"label": "📱 WhatsApp",   "default_toolset": "hermes-whatsapp"},
-    "signal":   {"label": "📡 Signal",     "default_toolset": "hermes-signal"},
-    "homeassistant": {"label": "🏠 Home Assistant", "default_toolset": "hermes-homeassistant"},
-    "email":    {"label": "📧 Email",      "default_toolset": "hermes-email"},
-    "matrix":   {"label": "💬 Matrix",     "default_toolset": "hermes-matrix"},
- "dingtalk": {"label": "💬 DingTalk", "default_toolset": "hermes-dingtalk"},
-    "feishu": {"label": "🪽 Feishu", "default_toolset": "hermes-feishu"},
-    "wecom": {"label": "💬 WeCom", "default_toolset": "hermes-wecom"},
-    "api_server": {"label": "🌐 API Server", "default_toolset": "hermes-api-server"},
-    "mattermost": {"label": "💬 Mattermost", "default_toolset": "hermes-mattermost"},
-    "webhook": {"label": "🔗 Webhook", "default_toolset": "hermes-webhook"},
+    k: {"label": info.label, "default_toolset": info.default_toolset}
+    for k, info in _PLATFORMS_REGISTRY.items()
 }
 
 
@@ -166,6 +122,7 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Nous Subscription",
+                "badge": "subscription",
                 "tag": "Managed OpenAI TTS billed to your subscription",
                 "env_vars": [],
                 "tts_provider": "openai",
@@ -175,25 +132,45 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Microsoft Edge TTS",
-                "tag": "Free - no API key needed",
+                "badge": "★ recommended · free",
+                "tag": "Good quality, no API key needed",
                 "env_vars": [],
                 "tts_provider": "edge",
             },
             {
                 "name": "OpenAI TTS",
-                "tag": "Premium - high quality voices",
+                "badge": "paid",
+                "tag": "High quality voices",
                 "env_vars": [
                     {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": "OpenAI API key", "url": "https://platform.openai.com/api-keys"},
                 ],
                 "tts_provider": "openai",
             },
             {
+                "name": "xAI TTS",
+                "tag": "Grok voices - requires xAI API key",
+                "env_vars": [
+                    {"key": "XAI_API_KEY", "prompt": "xAI API key", "url": "https://console.x.ai/"},
+                ],
+                "tts_provider": "xai",
+            },
+            {
                 "name": "ElevenLabs",
-                "tag": "Premium - most natural voices",
+                "badge": "paid",
+                "tag": "Most natural voices",
                 "env_vars": [
                     {"key": "ELEVENLABS_API_KEY", "prompt": "ElevenLabs API key", "url": "https://elevenlabs.io/app/settings/api-keys"},
                 ],
                 "tts_provider": "elevenlabs",
+            },
+            {
+                "name": "Mistral (Voxtral TTS)",
+                "badge": "paid",
+                "tag": "Multilingual, native Opus",
+                "env_vars": [
+                    {"key": "MISTRAL_API_KEY", "prompt": "Mistral API key", "url": "https://console.mistral.ai/"},
+                ],
+                "tts_provider": "mistral",
             },
         ],
     },
@@ -205,6 +182,7 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Nous Subscription",
+                "badge": "subscription",
                 "tag": "Managed Firecrawl billed to your subscription",
                 "web_backend": "firecrawl",
                 "env_vars": [],
@@ -214,7 +192,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Firecrawl Cloud",
-                "tag": "Hosted service - search, extract, and crawl",
+                "badge": "★ recommended",
+                "tag": "Full-featured search, extract, and crawl",
                 "web_backend": "firecrawl",
                 "env_vars": [
                     {"key": "FIRECRAWL_API_KEY", "prompt": "Firecrawl API key", "url": "https://firecrawl.dev"},
@@ -222,7 +201,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Exa",
-                "tag": "AI-native search and contents",
+                "badge": "paid",
+                "tag": "Neural search with semantic understanding",
                 "web_backend": "exa",
                 "env_vars": [
                     {"key": "EXA_API_KEY", "prompt": "Exa API key", "url": "https://exa.ai"},
@@ -230,7 +210,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Parallel",
-                "tag": "AI-native search and extract",
+                "badge": "paid",
+                "tag": "AI-powered search and extract",
                 "web_backend": "parallel",
                 "env_vars": [
                     {"key": "PARALLEL_API_KEY", "prompt": "Parallel API key", "url": "https://parallel.ai"},
@@ -238,7 +219,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Tavily",
-                "tag": "AI-native search, extract, and crawl",
+                "badge": "free tier",
+                "tag": "Search, extract, and crawl — 1000 free searches/mo",
                 "web_backend": "tavily",
                 "env_vars": [
                     {"key": "TAVILY_API_KEY", "prompt": "Tavily API key", "url": "https://app.tavily.com/home"},
@@ -246,7 +228,8 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "Firecrawl Self-Hosted",
-                "tag": "Free - run your own instance",
+                "badge": "free · self-hosted",
+                "tag": "Run your own Firecrawl instance (Docker)",
                 "web_backend": "firecrawl",
                 "env_vars": [
                     {"key": "FIRECRAWL_API_URL", "prompt": "Your Firecrawl instance URL (e.g., http://localhost:3002)"},
@@ -260,6 +243,7 @@ TOOL_CATEGORIES = {
         "providers": [
             {
                 "name": "Nous Subscription",
+                "badge": "subscription",
                 "tag": "Managed FAL image generation billed to your subscription",
                 "env_vars": [],
                 "requires_nous_auth": True,
@@ -268,6 +252,7 @@ TOOL_CATEGORIES = {
             },
             {
                 "name": "FAL.ai",
+                "badge": "paid",
                 "tag": "FLUX 2 Pro with auto-upscaling",
                 "env_vars": [
                     {"key": "FAL_KEY", "prompt": "FAL API key", "url": "https://fal.ai/dashboard/keys"},
@@ -280,44 +265,59 @@ TOOL_CATEGORIES = {
         "icon": "🌐",
         "providers": [
             {
-                "name": "Nous Subscription (Browserbase cloud)",
-                "tag": "Managed Browserbase billed to your subscription",
+                "name": "Nous Subscription (Browser Use cloud)",
+                "badge": "subscription",
+                "tag": "Managed Browser Use billed to your subscription",
                 "env_vars": [],
-                "browser_provider": "browserbase",
+                "browser_provider": "browser-use",
                 "requires_nous_auth": True,
                 "managed_nous_feature": "browser",
-                "override_env_vars": ["BROWSERBASE_API_KEY", "BROWSERBASE_PROJECT_ID"],
-                "post_setup": "browserbase",
+                "override_env_vars": ["BROWSER_USE_API_KEY"],
+                "post_setup": "agent_browser",
             },
             {
                 "name": "Local Browser",
-                "tag": "Free headless Chromium (no API key needed)",
+                "badge": "★ recommended · free",
+                "tag": "Headless Chromium, no API key needed",
                 "env_vars": [],
                 "browser_provider": "local",
-                "post_setup": "browserbase",  # Same npm install for agent-browser
+                "post_setup": "agent_browser",
             },
             {
                 "name": "Browserbase",
-                "tag": "Cloud browser with stealth & proxies",
+                "badge": "paid",
+                "tag": "Cloud browser with stealth and proxies",
                 "env_vars": [
                     {"key": "BROWSERBASE_API_KEY", "prompt": "Browserbase API key", "url": "https://browserbase.com"},
                     {"key": "BROWSERBASE_PROJECT_ID", "prompt": "Browserbase project ID"},
                 ],
                 "browser_provider": "browserbase",
-                "post_setup": "browserbase",
+                "post_setup": "agent_browser",
             },
             {
                 "name": "Browser Use",
+                "badge": "paid",
                 "tag": "Cloud browser with remote execution",
                 "env_vars": [
                     {"key": "BROWSER_USE_API_KEY", "prompt": "Browser Use API key", "url": "https://browser-use.com"},
                 ],
                 "browser_provider": "browser-use",
-                "post_setup": "browserbase",
+                "post_setup": "agent_browser",
+            },
+            {
+                "name": "Firecrawl",
+                "badge": "paid",
+                "tag": "Cloud browser with remote execution",
+                "env_vars": [
+                    {"key": "FIRECRAWL_API_KEY", "prompt": "Firecrawl API key", "url": "https://firecrawl.dev"},
+                ],
+                "browser_provider": "firecrawl",
+                "post_setup": "agent_browser",
             },
             {
                 "name": "Camofox",
-                "tag": "Local anti-detection browser (Firefox/Camoufox)",
+                "badge": "free · local",
+                "tag": "Anti-detection browser (Firefox/Camoufox)",
                 "env_vars": [
                     {"key": "CAMOFOX_URL", "prompt": "Camofox server URL", "default": "http://localhost:9377",
                      "url": "https://github.com/jo-inc/camofox-browser"},
@@ -372,7 +372,7 @@ TOOLSET_ENV_REQUIREMENTS = {
 def _run_post_setup(post_setup_key: str):
     """Run post-setup hooks for tools that need extra installation steps."""
     import shutil
-    if post_setup_key == "browserbase":
+    if post_setup_key in ("agent_browser", "browserbase"):
         node_modules = PROJECT_ROOT / "node_modules" / "agent-browser"
         if not node_modules.exists() and shutil.which("npm"):
             _print_info("    Installing Node.js dependencies for browser tools...")
@@ -390,7 +390,7 @@ def _run_post_setup(post_setup_key: str):
             _print_warning("    Node.js not found - browser tools require: npm install (in hermes-agent directory)")
 
     elif post_setup_key == "camofox":
-        camofox_dir = PROJECT_ROOT / "node_modules" / "@askjo" / "camoufox-browser"
+        camofox_dir = PROJECT_ROOT / "node_modules" / "@askjo" / "camofox-browser"
         if not camofox_dir.exists() and shutil.which("npm"):
             _print_info("    Installing Camofox browser server...")
             import subprocess
@@ -404,7 +404,7 @@ def _run_post_setup(post_setup_key: str):
                 _print_warning("    npm install failed - run manually: npm install")
         if camofox_dir.exists():
             _print_info("    Start the Camofox server:")
-            _print_info("      npx @askjo/camoufox-browser")
+            _print_info("      npx @askjo/camofox-browser")
             _print_info("    First run downloads the Camoufox engine (~300MB)")
             _print_info("    Or use Docker: docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser")
         elif not shutil.which("npm"):
@@ -454,6 +454,8 @@ def _get_enabled_platforms() -> List[str]:
         enabled.append("slack")
     if get_env_value("WHATSAPP_ENABLED"):
         enabled.append("whatsapp")
+    if get_env_value("QQ_APP_ID"):
+        enabled.append("qqbot")
     return enabled
 
 
@@ -505,6 +507,10 @@ def _get_platform_tools(
     if toolset_names is None or not isinstance(toolset_names, list):
         default_ts = PLATFORMS[platform]["default_toolset"]
         toolset_names = [default_ts]
+
+    # YAML may parse bare numeric names (e.g. ``12306:``) as int.
+    # Normalise to str so downstream sorted() never mixes types.
+    toolset_names = [str(ts) for ts in toolset_names]
 
     configurable_keys = {ts_key for ts_key, _, _ in CONFIGURABLE_TOOLSETS}
 
@@ -561,17 +567,23 @@ def _get_platform_tools(
     # MCP servers are expected to be available on all platforms by default.
     # If the platform explicitly lists one or more MCP server names, treat that
     # as an allowlist. Otherwise include every globally enabled MCP server.
+    # Special sentinel: "no_mcp" in the toolset list disables all MCP servers.
     mcp_servers = config.get("mcp_servers") or {}
     enabled_mcp_servers = {
-        name
+        str(name)
         for name, server_cfg in mcp_servers.items()
         if isinstance(server_cfg, dict)
         and _parse_enabled_flag(server_cfg.get("enabled", True), default=True)
     }
-    explicit_mcp_servers = explicit_passthrough & enabled_mcp_servers
-    enabled_toolsets.update(explicit_passthrough - enabled_mcp_servers)
+    # Allow "no_mcp" sentinel to opt out of all MCP servers for this platform
+    if "no_mcp" in toolset_names:
+        explicit_mcp_servers = set()
+        enabled_toolsets.update(explicit_passthrough - enabled_mcp_servers - {"no_mcp"})
+    else:
+        explicit_mcp_servers = explicit_passthrough & enabled_mcp_servers
+        enabled_toolsets.update(explicit_passthrough - enabled_mcp_servers)
     if include_default_mcp_servers:
-        if explicit_mcp_servers:
+        if explicit_mcp_servers or "no_mcp" in toolset_names:
             enabled_toolsets.update(explicit_mcp_servers)
         else:
             enabled_toolsets.update(enabled_mcp_servers)
@@ -664,84 +676,9 @@ def _toolset_has_keys(ts_key: str, config: dict = None) -> bool:
 # ─── Menu Helpers ─────────────────────────────────────────────────────────────
 
 def _prompt_choice(question: str, choices: list, default: int = 0) -> int:
-    """Single-select menu (arrow keys). Uses curses to avoid simple_term_menu
-    rendering bugs in tmux, iTerm, and other non-standard terminals."""
-
-    # Curses-based single-select — works in tmux, iTerm, and standard terminals
-    try:
-        import curses
-        result_holder = [default]
-
-        def _curses_menu(stdscr):
-            curses.curs_set(0)
-            if curses.has_colors():
-                curses.start_color()
-                curses.use_default_colors()
-                curses.init_pair(1, curses.COLOR_GREEN, -1)
-                curses.init_pair(2, curses.COLOR_YELLOW, -1)
-            cursor = default
-
-            while True:
-                stdscr.clear()
-                max_y, max_x = stdscr.getmaxyx()
-                try:
-                    stdscr.addnstr(0, 0, question, max_x - 1,
-                                   curses.A_BOLD | (curses.color_pair(2) if curses.has_colors() else 0))
-                except curses.error:
-                    pass
-
-                for i, c in enumerate(choices):
-                    y = i + 2
-                    if y >= max_y - 1:
-                        break
-                    arrow = "→" if i == cursor else " "
-                    line = f" {arrow}  {c}"
-                    attr = curses.A_NORMAL
-                    if i == cursor:
-                        attr = curses.A_BOLD
-                        if curses.has_colors():
-                            attr |= curses.color_pair(1)
-                    try:
-                        stdscr.addnstr(y, 0, line, max_x - 1, attr)
-                    except curses.error:
-                        pass
-
-                stdscr.refresh()
-                key = stdscr.getch()
-
-                if key in (curses.KEY_UP, ord('k')):
-                    cursor = (cursor - 1) % len(choices)
-                elif key in (curses.KEY_DOWN, ord('j')):
-                    cursor = (cursor + 1) % len(choices)
-                elif key in (curses.KEY_ENTER, 10, 13):
-                    result_holder[0] = cursor
-                    return
-                elif key in (27, ord('q')):
-                    return
-
-        curses.wrapper(_curses_menu)
-        return result_holder[0]
-
-    except Exception:
-        pass
-
-    # Fallback: numbered input (Windows without curses, etc.)
-    print(color(question, Colors.YELLOW))
-    for i, c in enumerate(choices):
-        marker = "●" if i == default else "○"
-        style = Colors.GREEN if i == default else ""
-        print(color(f"  {marker} {i+1}. {c}", style) if style else f"  {marker} {i+1}. {c}")
-    while True:
-        try:
-            val = input(color(f"  Select [1-{len(choices)}] ({default + 1}): ", Colors.DIM))
-            if not val:
-                return default
-            idx = int(val) - 1
-            if 0 <= idx < len(choices):
-                return idx
-        except (ValueError, KeyboardInterrupt, EOFError):
-            print()
-            return default
+    """Single-select menu (arrow keys). Delegates to curses_radiolist."""
+    from hermes_cli.curses_ui import curses_radiolist
+    return curses_radiolist(question, choices, selected=default, cancel_returns=default)
 
 
 # ─── Token Estimation ────────────────────────────────────────────────────────
@@ -929,7 +866,8 @@ def _configure_tool_category(ts_key: str, cat: dict, config: dict):
         # Plain text labels only (no ANSI codes in menu items)
         provider_choices = []
         for p in providers:
-            tag = f" ({p['tag']})" if p.get("tag") else ""
+            badge = f" [{p['badge']}]" if p.get("badge") else ""
+            tag = f" — {p['tag']}" if p.get("tag") else ""
             configured = ""
             env_vars = p.get("env_vars", [])
             if not env_vars or all(get_env_value(v["key"]) for v in env_vars):
@@ -939,7 +877,7 @@ def _configure_tool_category(ts_key: str, cat: dict, config: dict):
                     configured = ""
                 else:
                     configured = " [configured]"
-            provider_choices.append(f"{p['name']}{tag}{configured}")
+            provider_choices.append(f"{p['name']}{badge}{tag}{configured}")
 
         # Add skip option
         provider_choices.append("Skip — keep defaults / configure later")
@@ -1016,22 +954,42 @@ def _configure_provider(provider: dict, config: dict):
 
     # Set TTS provider in config if applicable
     if provider.get("tts_provider"):
-        config.setdefault("tts", {})["provider"] = provider["tts_provider"]
+        tts_cfg = config.setdefault("tts", {})
+        tts_cfg["provider"] = provider["tts_provider"]
+        tts_cfg["use_gateway"] = bool(managed_feature)
 
     # Set browser cloud provider in config if applicable
     if "browser_provider" in provider:
         bp = provider["browser_provider"]
+        browser_cfg = config.setdefault("browser", {})
         if bp == "local":
-            config.setdefault("browser", {})["cloud_provider"] = "local"
+            browser_cfg["cloud_provider"] = "local"
             _print_success("  Browser set to local mode")
         elif bp:
-            config.setdefault("browser", {})["cloud_provider"] = bp
+            browser_cfg["cloud_provider"] = bp
             _print_success(f"  Browser cloud provider set to: {bp}")
+        browser_cfg["use_gateway"] = bool(managed_feature)
 
     # Set web search backend in config if applicable
     if provider.get("web_backend"):
-        config.setdefault("web", {})["backend"] = provider["web_backend"]
+        web_cfg = config.setdefault("web", {})
+        web_cfg["backend"] = provider["web_backend"]
+        web_cfg["use_gateway"] = bool(managed_feature)
         _print_success(f"  Web backend set to: {provider['web_backend']}")
+
+    # For tools without a specific config key (e.g. image_gen), still
+    # track use_gateway so the runtime knows the user's intent.
+    if managed_feature and managed_feature not in ("web", "tts", "browser"):
+        config.setdefault(managed_feature, {})["use_gateway"] = True
+    elif not managed_feature:
+        # User picked a non-gateway provider — find which category this
+        # belongs to and clear use_gateway if it was previously set.
+        for cat_key, cat in TOOL_CATEGORIES.items():
+            if provider in cat.get("providers", []):
+                section = config.get(cat_key)
+                if isinstance(section, dict) and section.get("use_gateway"):
+                    section["use_gateway"] = False
+                break
 
     if not env_vars:
         if provider.get("post_setup"):
@@ -1039,11 +997,6 @@ def _configure_provider(provider: dict, config: dict):
         _print_success(f"  {provider['name']} - no configuration needed!")
         if managed_feature:
             _print_info("  Requests for this tool will be billed to your Nous subscription.")
-            override_envs = provider.get("override_env_vars", [])
-            if any(get_env_value(env_var) for env_var in override_envs):
-                _print_warning(
-                    "  Direct credentials are still configured and may take precedence until you remove them from ~/.hermes/.env."
-                )
         return
 
     # Prompt for each required env var
@@ -1195,7 +1148,8 @@ def _configure_tool_category_for_reconfig(ts_key: str, cat: dict, config: dict):
 
         provider_choices = []
         for p in providers:
-            tag = f" ({p['tag']})" if p.get("tag") else ""
+            badge = f" [{p['badge']}]" if p.get("badge") else ""
+            tag = f" — {p['tag']}" if p.get("tag") else ""
             configured = ""
             env_vars = p.get("env_vars", [])
             if not env_vars or all(get_env_value(v["key"]) for v in env_vars):
@@ -1205,7 +1159,7 @@ def _configure_tool_category_for_reconfig(ts_key: str, cat: dict, config: dict):
                     configured = ""
                 else:
                     configured = " [configured]"
-            provider_choices.append(f"{p['name']}{tag}{configured}")
+            provider_choices.append(f"{p['name']}{badge}{tag}{configured}")
 
         default_idx = _detect_active_provider_index(providers, config)
 
@@ -1248,11 +1202,6 @@ def _reconfigure_provider(provider: dict, config: dict):
         _print_success(f"  {provider['name']} - no configuration needed!")
         if managed_feature:
             _print_info("  Requests for this tool will be billed to your Nous subscription.")
-            override_envs = provider.get("override_env_vars", [])
-            if any(get_env_value(env_var) for env_var in override_envs):
-                _print_warning(
-                    "  Direct credentials are still configured and may take precedence until you remove them from ~/.hermes/.env."
-                )
         return
 
     for var in env_vars:
@@ -1336,6 +1285,7 @@ def tools_command(args=None, first_install: bool = False, config: dict = None):
     print(color("⚕ Hermes Tool Configuration", Colors.CYAN, Colors.BOLD))
     print(color("  Enable or disable tools per platform.", Colors.DIM))
     print(color("  Tools that need API keys will be configured when enabled.", Colors.DIM))
+    print(color("  Guide: https://hermes-agent.nousresearch.com/docs/user-guide/features/tools", Colors.DIM))
     print()
 
     # ── First-time install: linear flow, no platform menu ──
