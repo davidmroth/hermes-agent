@@ -13,6 +13,7 @@ import logging
 import mimetypes
 import os
 import socket
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "http://127.0.0.1:3000"
 DEFAULT_POLL_INTERVAL = 1.0
 DEFAULT_TIMEOUT_SECONDS = 30.0
+DEFAULT_COMMAND_SYNC_INTERVAL = 300.0
 
 
 def check_webchat_requirements() -> bool:
@@ -60,6 +62,11 @@ class WebChatAdapter(BasePlatformAdapter):
         self._service_token = config.token or os.getenv("WEBCHAT_SERVICE_TOKEN", "")
         self._poll_interval = float(extra.get("poll_interval") or os.getenv("WEBCHAT_POLL_INTERVAL", str(DEFAULT_POLL_INTERVAL)))
         self._timeout_seconds = float(extra.get("timeout_seconds") or os.getenv("WEBCHAT_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS)))
+        self._command_sync_interval = float(
+            extra.get("command_sync_interval")
+            or os.getenv("WEBCHAT_COMMAND_SYNC_INTERVAL", str(DEFAULT_COMMAND_SYNC_INTERVAL))
+        )
+        self._next_command_sync_at = 0.0
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -71,6 +78,53 @@ class WebChatAdapter(BasePlatformAdapter):
 
     def _assistant_url(self, chat_id: str) -> str:
         return f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/assistant"
+
+    def _commands_sync_url(self) -> str:
+        return f"{self._base_url}/api/internal/hermes/commands"
+
+    @staticmethod
+    def _build_gateway_command_payload() -> list[Dict[str, Any]]:
+        from hermes_cli.commands import COMMAND_REGISTRY, _is_gateway_available, _resolve_config_gates
+
+        overrides = _resolve_config_gates()
+        payload: list[Dict[str, Any]] = []
+        for cmd in COMMAND_REGISTRY:
+            if not _is_gateway_available(cmd, overrides):
+                continue
+            payload.append(
+                {
+                    "command": f"/{cmd.name}",
+                    "description": cmd.description,
+                    "argsHint": cmd.args_hint,
+                    "category": cmd.category,
+                    "aliases": [f"/{alias}" for alias in cmd.aliases],
+                }
+            )
+        return payload
+
+    async def _sync_slash_commands(self, *, force: bool = False) -> None:
+        if self._client is None:
+            return
+
+        now = time.time()
+        if not force and now < self._next_command_sync_at:
+            return
+
+        self._next_command_sync_at = now + max(30.0, self._command_sync_interval)
+        payload = {
+            "commands": self._build_gateway_command_payload(),
+            "syncedAt": f"{datetime.utcnow().isoformat()}Z",
+        }
+
+        try:
+            response = await self._client.post(
+                self._commands_sync_url(),
+                json=payload,
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning("[%s] Failed to sync slash commands to webui: %s", self.name, exc)
 
     def _build_sender_trace(
         self,
@@ -180,6 +234,7 @@ class WebChatAdapter(BasePlatformAdapter):
             return False
 
         self._mark_connected()
+        await self._sync_slash_commands(force=True)
         self._poll_task = asyncio.create_task(self._poll_loop())
         self._background_tasks.add(self._poll_task)
         self._poll_task.add_done_callback(self._background_tasks.discard)
@@ -200,6 +255,7 @@ class WebChatAdapter(BasePlatformAdapter):
     async def _poll_loop(self) -> None:
         while self.is_connected:
             try:
+                await self._sync_slash_commands()
                 event = await self._fetch_event()
                 if not event:
                     await asyncio.sleep(self._poll_interval)
