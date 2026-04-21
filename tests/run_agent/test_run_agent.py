@@ -238,6 +238,69 @@ def _mock_response(
     return resp
 
 
+class TestLlamaCppTimingsExtraction:
+    def test_extract_llamacpp_timings_from_top_level_field(self, agent):
+        source = SimpleNamespace(
+            timings={
+                "prompt_n": 12,
+                "prompt_ms": 34.5,
+                "predicted_n": 7,
+                "predicted_ms": 89.0,
+                "cache_n": 2,
+                "ignored": "x",
+            }
+        )
+
+        assert agent._extract_llamacpp_timings(source) == {
+            "prompt_n": 12,
+            "prompt_ms": 34.5,
+            "predicted_n": 7,
+            "predicted_ms": 89.0,
+            "cache_n": 2,
+        }
+
+    def test_extract_llamacpp_timings_from_usage_field(self, agent):
+        source = SimpleNamespace(
+            usage=SimpleNamespace(
+                timings={
+                    "prompt_n": 5,
+                    "prompt_ms": 10.0,
+                    "predicted_n": 6,
+                    "predicted_ms": 11.0,
+                }
+            )
+        )
+
+        assert agent._extract_llamacpp_timings(source) == {
+            "prompt_n": 5,
+            "prompt_ms": 10.0,
+            "predicted_n": 6,
+            "predicted_ms": 11.0,
+        }
+
+    def test_extract_llamacpp_timings_from_model_dump(self, agent):
+        class DumpOnly:
+            def model_dump(self, mode="python"):
+                assert mode == "python"
+                return {
+                    "usage": {
+                        "timings": {
+                            "prompt_n": 9,
+                            "prompt_ms": 12.5,
+                            "predicted_n": 4,
+                            "predicted_ms": 20.0,
+                        }
+                    }
+                }
+
+        assert agent._extract_llamacpp_timings(DumpOnly()) == {
+            "prompt_n": 9,
+            "prompt_ms": 12.5,
+            "predicted_n": 4,
+            "predicted_ms": 20.0,
+        }
+
+
 # ===================================================================
 # Group 1: Pure Functions
 # ===================================================================

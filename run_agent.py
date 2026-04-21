@@ -2949,6 +2949,36 @@ class AIAgent:
             if isinstance(extra, dict):
                 raw = extra.get("timings")
         if raw is None:
+            usage = getattr(source, "usage", None)
+            raw = getattr(usage, "timings", None)
+            if raw is None and isinstance(usage, dict):
+                raw = usage.get("timings")
+            if raw is None:
+                usage_extra = getattr(usage, "model_extra", None)
+                if isinstance(usage_extra, dict):
+                    raw = usage_extra.get("timings")
+        if raw is None:
+            dumped = None
+            dumper = getattr(source, "model_dump", None)
+            if callable(dumper):
+                try:
+                    dumped = dumper(mode="python")
+                except TypeError:
+                    try:
+                        dumped = dumper()
+                    except Exception:
+                        dumped = None
+                except Exception:
+                    dumped = None
+            if isinstance(dumped, dict):
+                raw = dumped.get("timings")
+                if raw is None:
+                    usage_dump = dumped.get("usage")
+                    if isinstance(usage_dump, dict):
+                        raw = usage_dump.get("timings")
+        if raw is None and hasattr(source, "__dict__"):
+            raw = getattr(source, "__dict__", {}).get("timings")
+        if raw is None:
             return None
 
         def _get(obj: Any, key: str) -> Any:
