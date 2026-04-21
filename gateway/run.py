@@ -8459,9 +8459,46 @@ class GatewayRunner:
         _status_adapter = self.adapters.get(source.platform)
         _status_chat_id = source.chat_id
         _status_thread_metadata = {"thread_id": _progress_thread_id} if _progress_thread_id else None
+        _status_error_buffer: list[str] = []
+
+        def _is_bufferable_status_message(text: str) -> bool:
+            """Return True for retry/failure lifecycle lines worth collapsing.
+
+            WebChat displays each status callback as a standalone assistant
+            message. For retry storms this can flood the transcript with near-
+            duplicate lines. Buffer these lines and append them once to the
+            final failed response body.
+            """
+            normalized = (text or "").strip().lower()
+            if not normalized:
+                return False
+            markers = (
+                "retrying in",
+                "rate limit reached",
+                "max retries",
+                "api failed after",
+                "rate limited after",
+                "giving up",
+                "trying fallback",
+            )
+            return any(marker in normalized for marker in markers)
+
+        def _append_unique_status_line(text: str) -> None:
+            line = (text or "").strip()
+            if not line:
+                return
+            if line not in _status_error_buffer:
+                _status_error_buffer.append(line)
 
         def _status_callback_sync(event_type: str, message: str) -> None:
             if not _status_adapter:
+                return
+            if (
+                source.platform == Platform.WEBCHAT
+                and event_type == "lifecycle"
+                and _is_bufferable_status_message(message)
+            ):
+                _append_unique_status_line(message)
                 return
             try:
                 asyncio.run_coroutine_threadsafe(
@@ -8931,6 +8968,12 @@ class GatewayRunner:
 
             if not final_response:
                 error_msg = f"⚠️ {result['error']}" if result.get("error") else ""
+                if source.platform == Platform.WEBCHAT and _status_error_buffer:
+                    details = "\n".join(_status_error_buffer)
+                    if error_msg:
+                        error_msg = f"{error_msg}\n\nRetry details:\n{details}"
+                    else:
+                        error_msg = f"Retry details:\n{details}"
                 return {
                     "final_response": error_msg,
                     "messages": result.get("messages", []),
@@ -8979,6 +9022,11 @@ class GatewayRunner:
                     if has_voice_directive:
                         unique_tags.insert(0, "[[audio_as_voice]]")
                     final_response = final_response + "\n" + "\n".join(unique_tags)
+
+                if source.platform == Platform.WEBCHAT and _status_error_buffer and result.get("failed"):
+                    details = "\n".join(_status_error_buffer)
+                    if details not in final_response:
+                        final_response = f"{final_response}\n\nRetry details:\n{details}"
             
             # Sync session_id: the agent may have created a new session during
             # mid-run context compression (_compress_context splits sessions).
