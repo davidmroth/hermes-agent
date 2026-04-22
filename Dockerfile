@@ -33,7 +33,10 @@ RUN npm install --prefer-offline --no-audit && \
 
 # Hand ownership to hermes user, then install Python deps in a virtualenv
 RUN chown -R hermes:hermes /opt/hermes
-RUN chgrp hermes /var/run/docker.sock
+
+# For docker that is already defined on the host, we create a group with the same GID
+RUN groupadd -g 990 docker
+RUN usermod -aG docker hermes
 USER hermes
 
 RUN uv venv && \
