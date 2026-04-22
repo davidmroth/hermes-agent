@@ -39,21 +39,21 @@ services:
       # Route Hermes through the OpenCode sidecar using the existing ACP
       # subprocess adapter. Override these in .env if you want a different
       # provider or ACP command.
-      HERMES_INFERENCE_PROVIDER: ${HERMES_INFERENCE_PROVIDER:-copilot-acp}
-      HERMES_MODEL: ${HERMES_MODEL:-claude-sonnet-4.6}
-      HERMES_COPILOT_ACP_COMMAND: ${HERMES_COPILOT_ACP_COMMAND:-docker}
-      HERMES_COPILOT_ACP_ARGS: "${HERMES_COPILOT_ACP_ARGS:-exec -i hermes-opencode opencode acp --cwd /workspace}"
+      #HERMES_INFERENCE_PROVIDER: ${HERMES_INFERENCE_PROVIDER:-copilot-acp}
+      #HERMES_MODEL: ${HERMES_MODEL:-claude-sonnet-4.6}
+      #HERMES_COPILOT_ACP_COMMAND: ${HERMES_COPILOT_ACP_COMMAND:-docker}
+      #HERMES_COPILOT_ACP_ARGS: "${HERMES_COPILOT_ACP_ARGS:-exec -i hermes-opencode opencode acp --cwd /workspace}"
     env_file:
       - path: .env
         required: false
-    depends_on:
-      - opencode
+    #depends_on:
+    #  - opencode
     volumes:
       # Workspace for terminal commands
       - ./:/workspace
       # Docker socket — required for the OpenCode ACP bridge and optional
       # terminal-sandbox support.
-      - /var/run/docker.sock:/var/run/docker.sock
+      #- /var/run/docker.sock:/var/run/docker.sock
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py

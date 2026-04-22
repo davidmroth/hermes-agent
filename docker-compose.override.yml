@@ -16,8 +16,8 @@ services:
       - .data/hermes:/opt/data
       # AgentLens SDK — makes `from sdk import AgentLensClient` work
       - ../agentlens:/opt/agentlens-sdk
-      - /usr/bin/docker:/usr/bin/docker
-      - /var/run/docker.sock:/var/run/docker.sock
+      #- /usr/bin/docker:/usr/bin/docker
+      #- /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
       # Point to the actual IP of your llama.cpp server.
       # Change this if ai.local moves to a different IP.
