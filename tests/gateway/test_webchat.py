@@ -182,3 +182,27 @@ async def test_send_omits_timings_when_metadata_only_has_timings():
 
     assert posted["json"]["timings"]["prompt_n"] == 1
     assert "metadata" not in posted["json"]
+
+
+@pytest.mark.asyncio
+async def test_send_lifts_system_role_to_top_level_payload():
+    """Webchat adapter should hoist system-role transport metadata."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-44"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="⚡ Interrupting current task.",
+        metadata={"thread_id": "t-1", "message_role": "system"},
+    )
+
+    assert result.success is True
+    assert posted["json"]["role"] == "system"
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}

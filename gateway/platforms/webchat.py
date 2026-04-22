@@ -184,10 +184,18 @@ class WebChatAdapter(BasePlatformAdapter):
             # can store them in the dedicated ``messages.timings`` JSON column
             # without having to crack open ``metadata`` on the read path.
             timings = metadata.get("timings") if isinstance(metadata, dict) else None
+            message_role = metadata.get("message_role") if isinstance(metadata, dict) else None
             if timings:
                 payload["timings"] = timings
-                # Don't double-send inside metadata.
-                metadata = {k: v for k, v in metadata.items() if k != "timings"}
+            if message_role in {"assistant", "system"}:
+                payload["role"] = message_role
+            if timings or message_role in {"assistant", "system"}:
+                # Don't double-send lifted transport fields inside metadata.
+                metadata = {
+                    k: v
+                    for k, v in metadata.items()
+                    if k not in {"timings", "message_role"}
+                }
             if metadata:
                 payload["metadata"] = metadata
 

@@ -1381,7 +1381,8 @@ class GatewayRunner:
             if not adapter:
                 return True
 
-            thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+            thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else {}
+            thread_meta["message_role"] = "system"
             if self._queue_during_drain_enabled():
                 self._queue_or_replace_pending_event(session_key, event)
                 message = f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
@@ -1458,7 +1459,8 @@ class GatewayRunner:
             f"I'll respond to your message shortly."
         )
 
-        thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+        thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else {}
+        thread_meta["message_role"] = "system"
         try:
             await adapter._send_with_retry(
                 chat_id=event.source.chat_id,
