@@ -35,6 +35,7 @@ DELEGATE_BLOCKED_TOOLS = frozenset([
     "memory",          # no writes to shared MEMORY.md
     "send_message",    # no cross-platform side effects
     "send_file_to_webchat",  # no downloadable file side effects
+    "send_html_to_webchat",  # no downloadable or previewable webchat file side effects
     "execute_code",    # children should reason step-by-step, not write scripts
 ])
 
