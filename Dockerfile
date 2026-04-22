@@ -32,6 +32,7 @@ RUN npm install --prefer-offline --no-audit && \
     npm cache clean --force
 
 # Hand ownership to hermes user, then install Python deps in a virtualenv
+RUN usermod -aG docker hermes
 RUN chown -R hermes:hermes /opt/hermes
 USER hermes
 
