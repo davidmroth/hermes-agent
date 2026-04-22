@@ -36,14 +36,24 @@ services:
       # for isolated sandbox execution via the terminal-sandbox service.
       TERMINAL_ENV: local
       TERMINAL_CWD: /workspace
+      # Route Hermes through the OpenCode sidecar using the existing ACP
+      # subprocess adapter. Override these in .env if you want a different
+      # provider or ACP command.
+      HERMES_INFERENCE_PROVIDER: ${HERMES_INFERENCE_PROVIDER:-copilot-acp}
+      HERMES_MODEL: ${HERMES_MODEL:-claude-sonnet-4.6}
+      HERMES_COPILOT_ACP_COMMAND: ${HERMES_COPILOT_ACP_COMMAND:-docker}
+      HERMES_COPILOT_ACP_ARGS: "${HERMES_COPILOT_ACP_ARGS:-exec -i hermes-opencode opencode acp --cwd /workspace}"
     env_file:
       - path: .env
         required: false
+    depends_on:
+      - opencode
     volumes:
       # Workspace for terminal commands
       - ./:/workspace
-      # Docker socket — uncomment for terminal-sandbox support
-      # - /var/run/docker.sock:/var/run/docker.sock
+      # Docker socket — required for the OpenCode ACP bridge and optional
+      # terminal-sandbox support.
+      - /var/run/docker.sock:/var/run/docker.sock
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py
@@ -65,6 +75,32 @@ services:
       - .data/hermes_home:/root
     stdin_open: true
     tty: true
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # ---------------------------------------------------------------------------
+  # OpenCode — ACP sidecar backend for Hermes
+  # Hermes reaches this container via `docker exec ... opencode acp --cwd
+  # /workspace`, while the long-lived `serve` process keeps the sidecar running
+  # and exposes OpenCode's HTTP API for manual attach/debugging.
+  # ---------------------------------------------------------------------------
+  opencode:
+    image: ghcr.io/anomalyco/opencode
+    container_name: hermes-opencode
+    restart: unless-stopped
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    working_dir: /workspace
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./:/workspace
+      - .data/opencode:/root
+    ports:
+      - "4096:4096"
     logging:
       driver: "json-file"
       options:
