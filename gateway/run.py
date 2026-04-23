@@ -8427,6 +8427,7 @@ class GatewayRunner:
         result_holder = [None]  # Mutable container for the result
         tools_holder = [None]   # Mutable container for the tool definitions
         stream_consumer_holder = [None]  # Mutable container for stream consumer
+        preview_send_future_holder = [None]  # Preview send result for post-turn timing reconciliation
         
         # Bridge sync step_callback → async hooks.emit for agent:step events
         _loop_for_step = asyncio.get_running_loop()
@@ -8643,7 +8644,7 @@ class GatewayRunner:
                 if already_streamed or not _status_adapter or not str(text or "").strip():
                     return
                 try:
-                    asyncio.run_coroutine_threadsafe(
+                    preview_send_future_holder[0] = asyncio.run_coroutine_threadsafe(
                         _status_adapter.send(
                             _status_chat_id,
                             text,
@@ -9074,6 +9075,7 @@ class GatewayRunner:
             return {
                 "final_response": final_response,
                 "last_reasoning": result.get("last_reasoning"),
+                "timings": result.get("timings"),
                 "messages": result_holder[0].get("messages", []) if result_holder[0] else [],
                 "api_calls": result_holder[0].get("api_calls", 0) if result_holder[0] else 0,
                 "tools": tools_holder[0] or [],
@@ -9618,6 +9620,40 @@ class GatewayRunner:
         # tool call, setting already_sent=True, but that text is NOT the
         # final answer.  Suppressing delivery here leaves the user staring
         # at silence.  (#10xxx — "agent stops after web search")
+        if (
+            isinstance(response, dict)
+            and response.get("response_previewed")
+            and response.get("timings")
+            and source.platform == Platform.WEBCHAT
+            and _status_adapter
+            and preview_send_future_holder[0] is not None
+        ):
+            try:
+                _preview_result = preview_send_future_holder[0].result(timeout=5.0)
+                _preview_message_id = getattr(_preview_result, "message_id", "") or ""
+                if _preview_message_id:
+                    _reconcile_metadata = dict(_status_thread_metadata or {})
+                    _reconcile_metadata["message_id"] = _preview_message_id
+                    _reconcile_metadata["timings"] = response.get("timings")
+                    _message_role = response.get("message_role")
+                    if _message_role in {"assistant", "system"}:
+                        _reconcile_metadata["message_role"] = _message_role
+                    _reconcile_result = await _status_adapter.send(
+                        _status_chat_id,
+                        response.get("final_response") or "",
+                        metadata=_reconcile_metadata,
+                    )
+                    if not getattr(_reconcile_result, "success", False):
+                        logger.warning(
+                            "Failed to reconcile previewed webchat reply %s with timings: %s",
+                            _preview_message_id,
+                            getattr(_reconcile_result, "error", "unknown error"),
+                        )
+                else:
+                    logger.debug("Previewed webchat reply had no message id; timings reconciliation skipped")
+            except Exception as _preview_err:
+                logger.debug("Could not reconcile previewed webchat timings: %s", _preview_err)
+
         _sc = stream_consumer_holder[0]
         if isinstance(response, dict) and not response.get("failed"):
             _final = response.get("final_response") or ""

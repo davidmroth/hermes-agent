@@ -54,6 +54,8 @@ def check_webchat_requirements() -> bool:
 class WebChatAdapter(BasePlatformAdapter):
     """Browser-chat adapter backed by the web UI service."""
 
+    SUPPORTS_MESSAGE_EDITING = False
+
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform.WEBCHAT)
         extra = config.extra or {}
@@ -166,6 +168,7 @@ class WebChatAdapter(BasePlatformAdapter):
         attachments: Optional[list[Dict[str, Any]]] = None,
         reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        message_id: Optional[str] = None,
     ) -> SendResult:
         if self._client is None:
             return SendResult(success=False, error="Webchat adapter is not connected")
@@ -175,6 +178,8 @@ class WebChatAdapter(BasePlatformAdapter):
             "content": content,
             "publicBaseUrl": self._public_base_url,
         }
+        if message_id:
+            payload["messageId"] = message_id
         if attachments:
             payload["attachments"] = attachments
         if reply_to:
@@ -399,11 +404,25 @@ class WebChatAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         try:
+            update_message_id: Optional[str] = None
+            transport_metadata = metadata
+            if isinstance(metadata, dict):
+                raw_message_id = metadata.get("message_id")
+                if isinstance(raw_message_id, str) and raw_message_id.strip():
+                    update_message_id = raw_message_id.strip()
+                    transport_metadata = {
+                        key: value
+                        for key, value in metadata.items()
+                        if key != "message_id"
+                    }
+                    if not transport_metadata:
+                        transport_metadata = None
             return await self._post_assistant_message(
                 chat_id=chat_id,
                 content=content,
                 reply_to=reply_to,
-                metadata=metadata,
+                metadata=transport_metadata,
+                message_id=update_message_id,
             )
         except Exception as exc:
             return SendResult(success=False, error=f"Webchat send failed: {exc}", retryable=True)

@@ -206,3 +206,31 @@ async def test_send_lifts_system_role_to_top_level_payload():
     assert result.success is True
     assert posted["json"]["role"] == "system"
     assert posted["json"]["metadata"] == {"thread_id": "t-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_uses_message_id_to_update_existing_assistant_message():
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-existing"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="Updated answer",
+        metadata={
+            "message_id": "msg-existing",
+            "thread_id": "t-1",
+            "timings": {"prompt_n": 2, "prompt_ms": 3.5},
+        },
+    )
+
+    assert result.success is True
+    assert posted["json"]["messageId"] == "msg-existing"
+    assert posted["json"]["timings"] == {"prompt_n": 2, "prompt_ms": 3.5}
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}

@@ -17,6 +17,7 @@ from gateway.session import SessionSource
 class ProgressCaptureAdapter(BasePlatformAdapter):
     def __init__(self, platform=Platform.TELEGRAM):
         super().__init__(PlatformConfig(enabled=True, token="***"), platform)
+        self.SUPPORTS_MESSAGE_EDITING = platform != Platform.WEBCHAT
         self.sent = []
         self.edits = []
         self.typing = []
@@ -379,6 +380,28 @@ class PreviewedResponseAgent:
         }
 
 
+class PreviewedTimedResponseAgent:
+    def __init__(self, **kwargs):
+        self.interim_assistant_callback = kwargs.get("interim_assistant_callback")
+        self.tools = []
+
+    def run_conversation(self, message, conversation_history=None, task_id=None):
+        if self.interim_assistant_callback:
+            self.interim_assistant_callback("You're welcome.", already_streamed=False)
+        return {
+            "final_response": "You're welcome.",
+            "response_previewed": True,
+            "timings": {
+                "prompt_n": 11,
+                "prompt_ms": 24.5,
+                "predicted_n": 6,
+                "predicted_ms": 31.0,
+            },
+            "messages": [],
+            "api_calls": 1,
+        }
+
+
 class StreamingRefineAgent:
     def __init__(self, **kwargs):
         self.stream_delta_callback = kwargs.get("stream_delta_callback")
@@ -640,6 +663,33 @@ async def test_run_agent_previewed_final_marks_already_sent(monkeypatch, tmp_pat
 
     assert result.get("already_sent") is True
     assert [call["content"] for call in adapter.sent] == ["You're welcome."]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_previewed_webchat_response_reconciles_timings(monkeypatch, tmp_path):
+    adapter, result = await _run_with_agent(
+        monkeypatch,
+        tmp_path,
+        PreviewedTimedResponseAgent,
+        session_id="sess-previewed-webchat",
+        platform=Platform.WEBCHAT,
+        chat_id="conv-previewed",
+        chat_type="dm",
+        config_data={"display": {"interim_assistant_messages": True}},
+    )
+
+    assert result.get("already_sent") is True
+    assert [call["content"] for call in adapter.sent] == ["You're welcome.", "You're welcome."]
+    assert adapter.sent[1]["metadata"] == {
+        "thread_id": "17585",
+        "message_id": "progress-1",
+        "timings": {
+            "prompt_n": 11,
+            "prompt_ms": 24.5,
+            "predicted_n": 6,
+            "predicted_ms": 31.0,
+        },
+    }
 
 
 @pytest.mark.asyncio
