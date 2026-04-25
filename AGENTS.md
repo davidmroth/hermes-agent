@@ -5,7 +5,7 @@ Instructions for AI coding assistants and developers working on the hermes-agent
 ## Development Environment
 
 ```bash
-source venv/bin/activate  # ALWAYS activate before running Python
+docker compose  # This repo runs in a Docker container exclusively for consistency. See docker-compose.yml for details.
 ```
 
 ## Project Structure
