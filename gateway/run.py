@@ -3457,6 +3457,55 @@ class GatewayRunner:
 
         return message_text
 
+    async def _load_history_for_event(self, session_entry, event, source):
+        history = self.session_store.load_transcript(session_entry.session_id)
+
+        if source.platform != Platform.WEBCHAT:
+            return history
+
+        raw_payload = event.raw_message if isinstance(event.raw_message, dict) else None
+        if not raw_payload:
+            return history
+
+        context_url = str(raw_payload.get("contextUrl") or "").strip()
+        if not context_url:
+            return history
+
+        adapter = self.adapters.get(Platform.WEBCHAT)
+        fetch_context = getattr(adapter, "fetch_conversation_context", None) if adapter else None
+        if not callable(fetch_context):
+            return history
+
+        try:
+            from gateway.platforms.webchat import build_webchat_context_transcript
+
+            context_payload = await fetch_context(context_url)
+            next_history = build_webchat_context_transcript(
+                context_payload or {},
+                exclude_message_id=event.message_id,
+            )
+            if not next_history:
+                return history
+
+            self.session_store.rewrite_transcript(session_entry.session_id, next_history)
+            marker = next_history[0].get("webchat_context") if next_history else None
+            logger.info(
+                "[gateway] Reconciled webchat session %s from page context chat=%s messages=%d curr_node=%s",
+                session_entry.session_id,
+                source.chat_id or "unknown",
+                max(0, len(next_history) - 1),
+                marker.get("currNode") if isinstance(marker, dict) else None,
+            )
+            return next_history
+        except Exception as exc:
+            logger.warning(
+                "[gateway] Failed to reconcile webchat context for chat=%s session=%s: %s",
+                source.chat_id or "unknown",
+                session_entry.session_id,
+                exc,
+            )
+            return history
+
     async def _handle_message_with_agent(self, event, source, _quick_key: str):
         """Inner handler that runs under the _running_agents sentinel guard."""
         _msg_start_time = time.time()
@@ -3605,7 +3654,7 @@ class GatewayRunner:
                 logger.warning("[Gateway] Failed to auto-load skill(s) %s: %s", _skill_names, e)
 
         # Load conversation history from transcript
-        history = self.session_store.load_transcript(session_entry.session_id)
+        history = await self._load_history_for_event(session_entry, event, source)
         
         # -----------------------------------------------------------------
         # Session hygiene: auto-compress pathologically large transcripts

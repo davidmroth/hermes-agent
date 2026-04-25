@@ -51,6 +51,190 @@ def check_webchat_requirements() -> bool:
     return HTTPX_AVAILABLE
 
 
+def _normalize_webchat_context_url(base_url: str, context_url: Any) -> Optional[str]:
+    raw = str(context_url or "").strip()
+    if not raw:
+        return None
+    if raw.startswith(("http://", "https://")):
+        return raw
+    if raw.startswith("/"):
+        return f"{base_url}{raw}"
+    return f"{base_url}/{raw}"
+
+
+def _normalize_webchat_context_marker(raw: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    conversation_id = str(raw.get("conversationId") or "").strip()
+    if not conversation_id:
+        return None
+
+    curr_node = raw.get("currNode")
+    if curr_node is not None:
+        curr_node = str(curr_node).strip() or None
+
+    try:
+        last_modified = int(raw.get("lastModified") or 0)
+    except (TypeError, ValueError):
+        last_modified = 0
+
+    raw_visible_ids = raw.get("visibleMessageIds")
+    visible_message_ids = (
+        [
+            str(message_id).strip()
+            for message_id in raw_visible_ids
+            if str(message_id).strip()
+        ]
+        if isinstance(raw_visible_ids, list)
+        else []
+    )
+
+    try:
+        schema_version = int(raw.get("schemaVersion") or 0)
+    except (TypeError, ValueError):
+        schema_version = 0
+
+    return {
+        "schemaVersion": schema_version,
+        "conversationId": conversation_id,
+        "currNode": curr_node,
+        "lastModified": last_modified,
+        "visibleMessageIds": visible_message_ids,
+    }
+
+
+def build_webchat_context_marker(context_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    conversation = context_payload.get("conversation")
+    if not isinstance(conversation, dict):
+        return None
+
+    return _normalize_webchat_context_marker(
+        {
+            "schemaVersion": context_payload.get("schemaVersion"),
+            "conversationId": conversation.get("id"),
+            "currNode": conversation.get("currNode"),
+            "lastModified": conversation.get("lastModified"),
+            "visibleMessageIds": context_payload.get("visibleMessageIds"),
+        }
+    )
+
+
+def _format_webchat_attachment_note(raw_attachments: Any) -> str:
+    if not isinstance(raw_attachments, list) or not raw_attachments:
+        return ""
+
+    summarized: list[str] = []
+    for raw_attachment in raw_attachments[:5]:
+        if not isinstance(raw_attachment, dict):
+            continue
+        file_name = str(raw_attachment.get("fileName") or "attachment").strip() or "attachment"
+        content_type = (
+            str(raw_attachment.get("contentType") or "application/octet-stream").strip()
+            or "application/octet-stream"
+        )
+        size_label = ""
+        try:
+            size_bytes = int(raw_attachment.get("sizeBytes") or 0)
+            if size_bytes > 0:
+                size_label = f", {size_bytes} bytes"
+        except (TypeError, ValueError):
+            size_label = ""
+        summarized.append(f"{file_name} ({content_type}{size_label})")
+
+    if not summarized:
+        return "[Attachments]"
+
+    remaining = max(0, len(raw_attachments) - len(summarized))
+    if remaining > 0:
+        summarized.append(f"+{remaining} more")
+
+    return f"[Attachments: {', '.join(summarized)}]"
+
+
+def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_message, dict):
+        return None
+
+    role = str(raw_message.get("role") or "").strip().lower()
+    if role not in {"user", "assistant", "system"}:
+        return None
+
+    mapped_role = "assistant" if role == "system" else role
+    content = str(raw_message.get("content") or "")
+    attachment_note = _format_webchat_attachment_note(raw_message.get("attachments"))
+
+    parts: list[str] = []
+    if role == "system":
+        normalized = content.strip()
+        if normalized:
+            parts.append(f"[System status] {normalized}")
+    elif content:
+        parts.append(content)
+
+    if attachment_note:
+        parts.append(attachment_note)
+
+    final_content = "\n\n".join(part for part in parts if part).strip()
+    if not final_content:
+        return None
+
+    entry: Dict[str, Any] = {
+        "role": mapped_role,
+        "content": final_content,
+    }
+
+    timestamp = str(raw_message.get("createdAt") or "").strip()
+    if timestamp:
+        entry["timestamp"] = timestamp
+
+    reasoning = raw_message.get("reasoningContent")
+    if mapped_role == "assistant" and isinstance(reasoning, str) and reasoning.strip():
+        entry["reasoning"] = reasoning.strip()
+
+    return entry
+
+
+def build_webchat_context_transcript(
+    context_payload: Dict[str, Any],
+    *,
+    exclude_message_id: Optional[str] = None,
+) -> list[Dict[str, Any]]:
+    marker = build_webchat_context_marker(context_payload)
+    if marker is None:
+        return []
+
+    raw_messages = context_payload.get("messages")
+    messages_by_id: Dict[str, Dict[str, Any]] = {}
+    if isinstance(raw_messages, list):
+        for raw_message in raw_messages:
+            if not isinstance(raw_message, dict):
+                continue
+            message_id = str(raw_message.get("id") or "").strip()
+            if not message_id:
+                continue
+            messages_by_id[message_id] = raw_message
+
+    transcript_timestamp = str(context_payload.get("exportedAt") or f"{datetime.utcnow().isoformat()}Z")
+    transcript: list[Dict[str, Any]] = [
+        {
+            "role": "session_meta",
+            "webchat_context": marker,
+            "timestamp": transcript_timestamp,
+        }
+    ]
+
+    excluded_id = str(exclude_message_id or "").strip()
+    for message_id in marker["visibleMessageIds"]:
+        if excluded_id and message_id == excluded_id:
+            continue
+        entry = _build_webchat_context_message(messages_by_id.get(message_id))
+        if entry:
+            transcript.append(entry)
+
+    return transcript
+
+
 class WebChatAdapter(BasePlatformAdapter):
     """Browser-chat adapter backed by the web UI service."""
 
@@ -83,6 +267,19 @@ class WebChatAdapter(BasePlatformAdapter):
 
     def _commands_sync_url(self) -> str:
         return f"{self._base_url}/api/internal/hermes/commands"
+
+    async def fetch_conversation_context(self, context_url: str) -> Optional[Dict[str, Any]]:
+        if self._client is None:
+            return None
+
+        normalized_url = _normalize_webchat_context_url(self._base_url, context_url)
+        if not normalized_url:
+            return None
+
+        response = await self._client.get(normalized_url, headers=self._headers())
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else None
 
     @staticmethod
     def _build_gateway_command_payload() -> list[Dict[str, Any]]:
@@ -294,11 +491,22 @@ class WebChatAdapter(BasePlatformAdapter):
             return None
         logger.debug("[%s] Dequeued event %s", self.name, event_id)
 
+        session_chat_id = str(
+            payload.get("sessionChatId")
+            or payload.get("conversationId")
+            or payload.get("chatId")
+            or event_id
+        )
+        context_url = _normalize_webchat_context_url(self._base_url, payload.get("contextUrl"))
+        if context_url:
+            payload["contextUrl"] = context_url
+        payload["sessionChatId"] = session_chat_id
+
         media_urls, media_types = await self._materialize_attachments(payload.get("attachments") or [])
         message_type = self._derive_message_type(payload.get("text", ""), media_types)
 
         source = self.build_source(
-            chat_id=str(payload.get("conversationId") or payload.get("chatId") or event_id),
+            chat_id=session_chat_id,
             chat_name=payload.get("conversationName"),
             chat_type=payload.get("chatType", "dm"),
             user_id=str(payload.get("userId") or payload.get("senderId") or "web-user"),
