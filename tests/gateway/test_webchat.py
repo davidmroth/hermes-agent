@@ -177,6 +177,7 @@ def test_build_gateway_command_payload_includes_aliases_and_dynamic_commands(mon
         gateway_config_module,
         "load_gateway_config",
         lambda: SimpleNamespace(
+            reset_triggers=["/new", "/reset"],
             quick_commands={
                 "build": {"type": "exec", "command": "npm run build"},
                 "notes": {
@@ -206,6 +207,7 @@ def test_build_gateway_command_payload_includes_aliases_and_dynamic_commands(mon
 
     assert "/new" in by_command
     assert "/reset" in by_command["/new"]["aliases"]
+    assert by_command["/new"]["requiresConfirmation"] is True
     assert by_command["/plugin-cmd"]["description"] == "Plugin command"
     assert by_command["/plugin-cmd"]["argsHint"] == "[arg]"
     assert by_command["/build"]["description"] == "exec: npm run build"

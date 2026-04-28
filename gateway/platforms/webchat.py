@@ -297,6 +297,24 @@ class WebChatAdapter(BasePlatformAdapter):
         payload: list[Dict[str, Any]] = []
         seen: set[str] = set()
 
+        try:
+            gateway_config = load_gateway_config()
+        except Exception:
+            gateway_config = None
+
+        quick_commands = getattr(gateway_config, "quick_commands", {}) or {}
+        raw_reset_triggers = getattr(gateway_config, "reset_triggers", ()) or ()
+        reset_triggers: set[str] = set()
+        for raw_trigger in raw_reset_triggers:
+            if not isinstance(raw_trigger, str):
+                continue
+            normalized = raw_trigger.strip().lower()
+            if not normalized:
+                continue
+            if not normalized.startswith("/"):
+                normalized = f"/{normalized}"
+            reset_triggers.add(normalized)
+
         def _append(entry: Dict[str, Any]) -> None:
             command = str(entry.get("command") or "").strip()
             if not command or command in seen:
@@ -304,33 +322,50 @@ class WebChatAdapter(BasePlatformAdapter):
             seen.add(command)
             payload.append(entry)
 
+        def _requires_confirmation(
+            command: str,
+            *,
+            aliases: list[str] | None = None,
+            alias_target: str | None = None,
+        ) -> bool:
+            def _normalize(raw_value: str | None) -> str:
+                value = str(raw_value or "").strip().lower()
+                if not value:
+                    return ""
+                return value if value.startswith("/") else f"/{value}"
+
+            candidates = {_normalize(command)}
+            for alias in aliases or []:
+                candidates.add(_normalize(alias))
+            if alias_target:
+                candidates.add(_normalize(alias_target))
+            return any(candidate in reset_triggers for candidate in candidates if candidate)
+
         for cmd in COMMAND_REGISTRY:
             if not _is_gateway_available(cmd, overrides):
                 continue
-            _append(
-                {
-                    "command": f"/{cmd.name}",
-                    "description": cmd.description,
-                    "argsHint": cmd.args_hint,
-                    "category": cmd.category,
-                    "aliases": [f"/{alias}" for alias in cmd.aliases],
-                }
-            )
+            aliases = [f"/{alias}" for alias in cmd.aliases]
+            entry: Dict[str, Any] = {
+                "command": f"/{cmd.name}",
+                "description": cmd.description,
+                "argsHint": cmd.args_hint,
+                "category": cmd.category,
+                "aliases": aliases,
+            }
+            if _requires_confirmation(entry["command"], aliases=aliases):
+                entry["requiresConfirmation"] = True
+            _append(entry)
 
         for name, description, args_hint in _iter_plugin_command_entries():
-            _append(
-                {
-                    "command": f"/{name}",
-                    "description": description,
-                    "argsHint": args_hint,
-                    "category": "Tools & Skills",
-                }
-            )
-
-        try:
-            quick_commands = load_gateway_config().quick_commands or {}
-        except Exception:
-            quick_commands = {}
+            entry = {
+                "command": f"/{name}",
+                "description": description,
+                "argsHint": args_hint,
+                "category": "Tools & Skills",
+            }
+            if _requires_confirmation(entry["command"]):
+                entry["requiresConfirmation"] = True
+            _append(entry)
 
         if isinstance(quick_commands, dict):
             for qname, qcmd in sorted(quick_commands.items()):
@@ -344,13 +379,15 @@ class WebChatAdapter(BasePlatformAdapter):
                 else:
                     default_desc = qtype or "quick command"
                 description = str(qcmd.get("description") or default_desc).strip() or "Quick command"
-                _append(
-                    {
-                        "command": f"/{qname}",
-                        "description": description[:120],
-                        "category": "User commands",
-                    }
-                )
+                entry = {
+                    "command": f"/{qname}",
+                    "description": description[:120],
+                    "category": "User commands",
+                }
+                alias_target = str(qcmd.get("target") or "").strip() if qtype == "alias" else None
+                if _requires_confirmation(entry["command"], alias_target=alias_target):
+                    entry["requiresConfirmation"] = True
+                _append(entry)
 
         try:
             disabled_skills = get_disabled_skill_names(platform="webchat")
@@ -372,13 +409,14 @@ class WebChatAdapter(BasePlatformAdapter):
                 if skill_name and skill_name in disabled_skills:
                     continue
                 description = str(info.get("description") or "Skill").strip() or "Skill"
-                _append(
-                    {
-                        "command": cmd_key,
-                        "description": description[:120],
-                        "category": "Tools & Skills",
-                    }
-                )
+                entry = {
+                    "command": cmd_key,
+                    "description": description[:120],
+                    "category": "Tools & Skills",
+                }
+                if _requires_confirmation(entry["command"]):
+                    entry["requiresConfirmation"] = True
+                _append(entry)
         return payload
 
     async def _sync_slash_commands(self, *, force: bool = False) -> None:
