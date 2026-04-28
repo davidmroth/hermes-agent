@@ -2363,8 +2363,21 @@ def warn_deprecated_cwd_env_vars(config: Optional[Dict[str, Any]] = None) -> Non
     These env vars are deprecated — the canonical setting is terminal.cwd
     in config.yaml.  Prints a migration hint to stderr.
     """
-    messaging_cwd = os.environ.get("MESSAGING_CWD")
-    terminal_cwd_env = os.environ.get("TERMINAL_CWD")
+    env_file_path = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / ".env"
+    env_file_values: Dict[str, str] = {}
+    try:
+        if env_file_path.is_file():
+            for raw_line in env_file_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                env_file_values[key.strip()] = value.strip()
+    except OSError:
+        return
+
+    messaging_cwd = env_file_values.get("MESSAGING_CWD")
+    terminal_cwd_env = env_file_values.get("TERMINAL_CWD")
 
     if config is None:
         try:
@@ -2384,7 +2397,6 @@ def warn_deprecated_cwd_env_vars(config: Optional[Dict[str, Any]] = None) -> Non
             f"this is deprecated."
         )
     if terminal_cwd_env and not config_has_explicit_cwd:
-        # TERMINAL_CWD in env but not from config bridge — likely from .env
         lines.append(
             f"  \033[33m⚠\033[0m TERMINAL_CWD={terminal_cwd_env} found in .env — "
             f"this is deprecated."
