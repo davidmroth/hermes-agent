@@ -283,14 +283,31 @@ class WebChatAdapter(BasePlatformAdapter):
 
     @staticmethod
     def _build_gateway_command_payload() -> list[Dict[str, Any]]:
-        from hermes_cli.commands import COMMAND_REGISTRY, _is_gateway_available, _resolve_config_gates
+        from agent.skill_commands import scan_skill_commands
+        from agent.skill_utils import get_disabled_skill_names
+        from gateway.config import load_gateway_config
+        from hermes_cli.commands import (
+            COMMAND_REGISTRY,
+            _is_gateway_available,
+            _iter_plugin_command_entries,
+            _resolve_config_gates,
+        )
 
         overrides = _resolve_config_gates()
         payload: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def _append(entry: Dict[str, Any]) -> None:
+            command = str(entry.get("command") or "").strip()
+            if not command or command in seen:
+                return
+            seen.add(command)
+            payload.append(entry)
+
         for cmd in COMMAND_REGISTRY:
             if not _is_gateway_available(cmd, overrides):
                 continue
-            payload.append(
+            _append(
                 {
                     "command": f"/{cmd.name}",
                     "description": cmd.description,
@@ -299,6 +316,69 @@ class WebChatAdapter(BasePlatformAdapter):
                     "aliases": [f"/{alias}" for alias in cmd.aliases],
                 }
             )
+
+        for name, description, args_hint in _iter_plugin_command_entries():
+            _append(
+                {
+                    "command": f"/{name}",
+                    "description": description,
+                    "argsHint": args_hint,
+                    "category": "Tools & Skills",
+                }
+            )
+
+        try:
+            quick_commands = load_gateway_config().quick_commands or {}
+        except Exception:
+            quick_commands = {}
+
+        if isinstance(quick_commands, dict):
+            for qname, qcmd in sorted(quick_commands.items()):
+                if not isinstance(qname, str) or not isinstance(qcmd, dict):
+                    continue
+                qtype = str(qcmd.get("type") or "").strip()
+                if qtype == "exec":
+                    default_desc = f"exec: {qcmd.get('command', '')}"
+                elif qtype == "alias":
+                    default_desc = f"alias -> {qcmd.get('target', '')}"
+                else:
+                    default_desc = qtype or "quick command"
+                description = str(qcmd.get("description") or default_desc).strip() or "Quick command"
+                _append(
+                    {
+                        "command": f"/{qname}",
+                        "description": description[:120],
+                        "category": "User commands",
+                    }
+                )
+
+        try:
+            disabled_skills = get_disabled_skill_names(platform="webchat")
+        except Exception:
+            disabled_skills = set()
+
+        try:
+            skill_commands = scan_skill_commands()
+        except Exception:
+            skill_commands = {}
+
+        if isinstance(skill_commands, dict):
+            for cmd_key, info in sorted(skill_commands.items()):
+                if not isinstance(cmd_key, str) or not cmd_key.startswith("/"):
+                    continue
+                if not isinstance(info, dict):
+                    continue
+                skill_name = str(info.get("name") or "").strip()
+                if skill_name and skill_name in disabled_skills:
+                    continue
+                description = str(info.get("description") or "Skill").strip() or "Skill"
+                _append(
+                    {
+                        "command": cmd_key,
+                        "description": description[:120],
+                        "category": "Tools & Skills",
+                    }
+                )
         return payload
 
     async def _sync_slash_commands(self, *, force: bool = False) -> None:

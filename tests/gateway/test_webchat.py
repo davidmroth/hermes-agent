@@ -161,6 +161,59 @@ async def test_fetch_conversation_context_resolves_relative_url():
     )
 
 
+def test_build_gateway_command_payload_includes_aliases_and_dynamic_commands(monkeypatch):
+    import agent.skill_commands as skill_commands_module
+    import agent.skill_utils as skill_utils_module
+    import gateway.config as gateway_config_module
+    import hermes_cli.commands as commands_module
+
+    monkeypatch.setattr(commands_module, "_resolve_config_gates", lambda: {})
+    monkeypatch.setattr(
+        commands_module,
+        "_iter_plugin_command_entries",
+        lambda: [("plugin-cmd", "Plugin command", "[arg]")],
+    )
+    monkeypatch.setattr(
+        gateway_config_module,
+        "load_gateway_config",
+        lambda: SimpleNamespace(
+            quick_commands={
+                "build": {"type": "exec", "command": "npm run build"},
+                "notes": {
+                    "type": "exec",
+                    "command": "cat NOTES.md",
+                    "description": "Open design notes",
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        skill_utils_module,
+        "get_disabled_skill_names",
+        lambda platform=None: {"Disabled Skill"} if platform == "webchat" else set(),
+    )
+    monkeypatch.setattr(
+        skill_commands_module,
+        "scan_skill_commands",
+        lambda: {
+            "/ship": {"name": "Ship Skill", "description": "Ship it"},
+            "/skip": {"name": "Disabled Skill", "description": "Skip me"},
+        },
+    )
+
+    payload = WebChatAdapter._build_gateway_command_payload()
+    by_command = {entry["command"]: entry for entry in payload}
+
+    assert "/new" in by_command
+    assert "/reset" in by_command["/new"]["aliases"]
+    assert by_command["/plugin-cmd"]["description"] == "Plugin command"
+    assert by_command["/plugin-cmd"]["argsHint"] == "[arg]"
+    assert by_command["/build"]["description"] == "exec: npm run build"
+    assert by_command["/notes"]["description"] == "Open design notes"
+    assert by_command["/ship"]["description"] == "Ship it"
+    assert "/skip" not in by_command
+
+
 @pytest.mark.asyncio
 async def test_on_processing_complete_acks_only_success():
     adapter = _build_adapter()

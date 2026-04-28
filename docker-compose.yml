@@ -72,7 +72,7 @@ services:
       - ./cron:/opt/hermes/cron
       - ./skills:/opt/hermes/skills
       - ./optional-skills:/opt/hermes/optional-skills
-      - .data/hermes_home:/root
+      - .data/hermes_home:/opt/data
     stdin_open: true
     tty: true
     logging:

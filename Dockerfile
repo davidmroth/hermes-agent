@@ -52,6 +52,10 @@ USER hermes
 RUN uv venv && \
     uv pip install --no-cache-dir -e ".[all]"
 
+# Runtime starts as root so the entrypoint can fix mounted-volume ownership
+# and then drop back to the hermes user via gosu.
+USER root
+
 # ---------- Runtime ----------
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 ENV HERMES_HOME=/opt/data
