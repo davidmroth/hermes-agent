@@ -4069,9 +4069,79 @@ class GatewayRunner:
             return history
 
         try:
-            from gateway.platforms.webchat import build_webchat_context_transcript
+            from gateway.platforms.webchat import (
+                build_webchat_context_marker,
+                build_webchat_context_transcript,
+            )
 
             context_payload = await fetch_context(context_url)
+            marker = build_webchat_context_marker(context_payload or {})
+
+            raw_context_version = raw_payload.get("contextVersion")
+            if marker and isinstance(raw_context_version, dict):
+                expected_curr_node = str(raw_context_version.get("currNode") or "").strip() or None
+                marker_curr_node = str(marker.get("currNode") or "").strip() or None
+                expected_conversation_id = str(raw_payload.get("conversationId") or "").strip() or None
+                marker_conversation_id = str(marker.get("conversationId") or "").strip() or None
+
+                try:
+                    expected_last_modified = int(raw_context_version.get("lastModified") or 0)
+                except (TypeError, ValueError):
+                    expected_last_modified = 0
+
+                try:
+                    marker_last_modified = int(marker.get("lastModified") or 0)
+                except (TypeError, ValueError):
+                    marker_last_modified = 0
+
+                if (
+                    expected_conversation_id
+                    and marker_conversation_id
+                    and marker_conversation_id != expected_conversation_id
+                ):
+                    logger.warning(
+                        "[gateway] Ignoring reconciled webchat context for chat=%s session=%s: "
+                        "conversation mismatch payload=%s fetched=%s",
+                        source.chat_id or "unknown",
+                        session_entry.session_id,
+                        expected_conversation_id,
+                        marker_conversation_id,
+                    )
+                    return history
+
+                if (
+                    expected_last_modified > 0
+                    and marker_last_modified > 0
+                    and marker_last_modified < expected_last_modified
+                ):
+                    logger.warning(
+                        "[gateway] Ignoring stale reconciled webchat context for chat=%s session=%s: "
+                        "payload lastModified=%s fetched=%s",
+                        source.chat_id or "unknown",
+                        session_entry.session_id,
+                        expected_last_modified,
+                        marker_last_modified,
+                    )
+                    return history
+
+                if (
+                    expected_last_modified > 0
+                    and marker_last_modified == expected_last_modified
+                    and expected_curr_node
+                    and marker_curr_node
+                    and marker_curr_node != expected_curr_node
+                ):
+                    logger.warning(
+                        "[gateway] Ignoring mismatched reconciled webchat context for chat=%s session=%s: "
+                        "payload curr_node=%s fetched=%s at lastModified=%s",
+                        source.chat_id or "unknown",
+                        session_entry.session_id,
+                        expected_curr_node,
+                        marker_curr_node,
+                        expected_last_modified,
+                    )
+                    return history
+
             next_history = build_webchat_context_transcript(
                 context_payload or {},
                 exclude_message_id=event.message_id,
@@ -4080,7 +4150,7 @@ class GatewayRunner:
                 return history
 
             self.session_store.rewrite_transcript(session_entry.session_id, next_history)
-            marker = next_history[0].get("webchat_context") if next_history else None
+            marker = next_history[0].get("webchat_context") if next_history else marker
             logger.info(
                 "[gateway] Reconciled webchat session %s from page context chat=%s messages=%d curr_node=%s",
                 session_entry.session_id,

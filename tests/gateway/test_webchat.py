@@ -1,14 +1,17 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from gateway.config import PlatformConfig
+from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent, MessageType, ProcessingOutcome
 from gateway.platforms.webchat import (
     WebChatAdapter,
     build_webchat_context_marker,
     build_webchat_context_transcript,
 )
+from gateway.run import GatewayRunner
+from gateway.session import SessionSource
 
 
 class _Response:
@@ -26,6 +29,19 @@ class _Response:
 def _build_adapter() -> WebChatAdapter:
     config = PlatformConfig(enabled=True, token="svc-token", extra={"url": "http://webui:3000"})
     return WebChatAdapter(config)
+
+
+def _build_runner_with_history(stored_history, fetched_payload):
+    runner = object.__new__(GatewayRunner)
+    runner.session_store = Mock()
+    runner.session_store.load_transcript.return_value = stored_history
+    runner.session_store.rewrite_transcript = Mock()
+    runner.adapters = {
+        Platform.WEBCHAT: SimpleNamespace(
+            fetch_conversation_context=AsyncMock(return_value=fetched_payload)
+        )
+    }
+    return runner
 
 
 @pytest.mark.asyncio
@@ -162,6 +178,120 @@ async def test_on_processing_complete_acks_only_success():
 
     await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
     adapter._ack_event.assert_awaited_once_with("evt-123")
+
+
+@pytest.mark.asyncio
+async def test_load_history_for_event_ignores_stale_context_version():
+    stored_history = [{"role": "user", "content": "Stored transcript"}]
+    fetched_payload = {
+        "schemaVersion": 1,
+        "conversation": {
+            "id": "conv-1",
+            "currNode": "assistant-1",
+            "lastModified": 41,
+        },
+        "visibleMessageIds": ["user-1", "assistant-1"],
+        "messages": [
+            {
+                "id": "user-1",
+                "role": "user",
+                "content": "Earlier question",
+                "createdAt": "2026-04-25T11:50:00.000Z",
+                "attachments": [],
+            },
+            {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": "Earlier answer",
+                "createdAt": "2026-04-25T11:51:00.000Z",
+                "attachments": [],
+            },
+        ],
+    }
+    runner = _build_runner_with_history(stored_history, fetched_payload)
+    source = SessionSource(platform=Platform.WEBCHAT, chat_id="conv-1")
+    event = MessageEvent(
+        text="Newest inbound prompt",
+        message_type=MessageType.TEXT,
+        message_id="user-2",
+        source=source,
+        raw_message={
+            "conversationId": "conv-1",
+            "contextUrl": "http://webui:3000/api/internal/hermes/conversations/conv-1/context",
+            "contextVersion": {"currNode": "assistant-2", "lastModified": 42},
+        },
+    )
+    session_entry = SimpleNamespace(session_id="sess-1")
+
+    history = await runner._load_history_for_event(session_entry, event, source)
+
+    assert history == stored_history
+    runner.session_store.rewrite_transcript.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_load_history_for_event_rewrites_when_context_version_matches():
+    stored_history = [{"role": "user", "content": "Stored transcript"}]
+    fetched_payload = {
+        "schemaVersion": 1,
+        "exportedAt": "2026-04-25T12:00:00.000Z",
+        "conversation": {
+            "id": "conv-1",
+            "currNode": "assistant-2",
+            "lastModified": 42,
+        },
+        "visibleMessageIds": ["user-1", "assistant-1", "user-2", "assistant-2"],
+        "messages": [
+            {
+                "id": "user-1",
+                "role": "user",
+                "content": "Earlier question",
+                "createdAt": "2026-04-25T11:50:00.000Z",
+                "attachments": [],
+            },
+            {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": "Earlier answer",
+                "createdAt": "2026-04-25T11:51:00.000Z",
+                "attachments": [],
+            },
+            {
+                "id": "user-2",
+                "role": "user",
+                "content": "Newest inbound prompt",
+                "createdAt": "2026-04-25T11:59:00.000Z",
+                "attachments": [],
+            },
+            {
+                "id": "assistant-2",
+                "role": "assistant",
+                "content": "Latest answer",
+                "createdAt": "2026-04-25T12:00:00.000Z",
+                "attachments": [],
+            },
+        ],
+    }
+    expected_history = build_webchat_context_transcript(fetched_payload, exclude_message_id="user-2")
+    runner = _build_runner_with_history(stored_history, fetched_payload)
+    source = SessionSource(platform=Platform.WEBCHAT, chat_id="conv-1")
+    event = MessageEvent(
+        text="Newest inbound prompt",
+        message_type=MessageType.TEXT,
+        message_id="user-2",
+        source=source,
+        raw_message={
+            "conversationId": "conv-1",
+            "contextUrl": "http://webui:3000/api/internal/hermes/conversations/conv-1/context",
+            "contextVersion": {"currNode": "assistant-2", "lastModified": 42},
+        },
+    )
+    session_entry = SimpleNamespace(session_id="sess-1")
+
+    history = await runner._load_history_for_event(session_entry, event, source)
+
+    assert history == expected_history
+    runner.session_store.rewrite_transcript.assert_called_once_with("sess-1", expected_history)
 
 
 @pytest.mark.asyncio
