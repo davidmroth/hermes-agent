@@ -9448,6 +9448,7 @@ class GatewayRunner:
         _interrupt_depth: int = 0,
         event_message_id: Optional[str] = None,
         channel_prompt: Optional[str] = None,
+        skip_tool_tail_auto_continue: bool = False,
     ) -> Dict[str, Any]:
         """
         Run the agent with the given message and context.
@@ -10314,7 +10315,11 @@ class GatewayRunner:
                     f"message below.]\n\n"
                     + message
                 )
-            elif agent_history and agent_history[-1].get("role") == "tool":
+            elif (
+                not skip_tool_tail_auto_continue
+                and agent_history
+                and agent_history[-1].get("role") == "tool"
+            ):
                 message = (
                     "[System note: Your previous turn was interrupted before you could "
                     "process the last tool result(s). The conversation history contains "
@@ -10997,6 +11002,7 @@ class GatewayRunner:
                     _interrupt_depth=_interrupt_depth + 1,
                     event_message_id=next_message_id,
                     channel_prompt=next_channel_prompt,
+                    skip_tool_tail_auto_continue=bool(was_interrupted),
                 )
         finally:
             # Stop progress sender, interrupt monitor, and notification task

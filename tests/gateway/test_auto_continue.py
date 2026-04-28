@@ -9,7 +9,12 @@ finishes the interrupted work before addressing the new input.
 import pytest
 
 
-def _simulate_auto_continue(agent_history: list, user_message: str) -> str:
+def _simulate_auto_continue(
+    agent_history: list,
+    user_message: str,
+    *,
+    skip_tool_tail_auto_continue: bool = False,
+) -> str:
     """Reproduce the auto-continue injection logic from _run_agent().
 
     This mirrors the exact code in gateway/run.py so we can test the
@@ -17,7 +22,11 @@ def _simulate_auto_continue(agent_history: list, user_message: str) -> str:
     gateway runner.
     """
     message = user_message
-    if agent_history and agent_history[-1].get("role") == "tool":
+    if (
+        not skip_tool_tail_auto_continue
+        and agent_history
+        and agent_history[-1].get("role") == "tool"
+    ):
         message = (
             "[System note: Your previous turn was interrupted before you could "
             "process the last tool result(s). The conversation history contains "
@@ -93,3 +102,21 @@ class TestAutoDetection:
         note_end = result.index("]\n\n")
         user_msg_start = result.index("now do X")
         assert user_msg_start > note_end
+
+    def test_user_interrupt_followup_skips_tool_tail_note(self):
+        """A new user message that interrupts active work should not be forced
+        to finish the prior tool result before addressing the new prompt."""
+        history = [
+            {"role": "user", "content": "debug the permission error"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "call_1", "function": {"name": "terminal", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "Permission denied"},
+        ]
+        result = _simulate_auto_continue(
+            history,
+            "why do you keep resetting?",
+            skip_tool_tail_auto_continue=True,
+        )
+        assert "[System note:" not in result
+        assert result == "why do you keep resetting?"
