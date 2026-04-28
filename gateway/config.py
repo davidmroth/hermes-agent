@@ -60,6 +60,7 @@ class Platform(Enum):
     SMS = "sms"
     DINGTALK = "dingtalk"
     API_SERVER = "api_server"
+    WEBCHAT = "webchat"
     WEBHOOK = "webhook"
     FEISHU = "feishu"
     WECOM = "wecom"
@@ -293,6 +294,9 @@ class GatewayConfig:
                 connected.append(platform)
             # API Server uses enabled flag only (no token needed)
             elif platform == Platform.API_SERVER:
+                connected.append(platform)
+            # Webchat uses a service token + base URL managed in config.extra
+            elif platform == Platform.WEBCHAT:
                 connected.append(platform)
             # Webhook uses enabled flag only (secrets are per-route)
             elif platform == Platform.WEBHOOK:
@@ -935,6 +939,7 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
             "http_url": signal_url,
             "account": signal_account,
             "ignore_stories": os.getenv("SIGNAL_IGNORE_STORIES", "true").lower() in ("true", "1", "yes"),
+            "send_read_receipts": os.getenv("SIGNAL_READ_RECEIPTS", "true").lower() in ("true", "1", "yes"),
         })
     signal_home = os.getenv("SIGNAL_HOME_CHANNEL")
     if signal_home and Platform.SIGNAL in config.platforms:
@@ -1068,6 +1073,36 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         api_server_model_name = os.getenv("API_SERVER_MODEL_NAME", "")
         if api_server_model_name:
             config.platforms[Platform.API_SERVER].extra["model_name"] = api_server_model_name
+
+    # Webchat platform
+    webchat_enabled = os.getenv("WEBCHAT_ENABLED", "").lower() in ("true", "1", "yes")
+    webchat_url = os.getenv("WEBCHAT_URL", "")
+    webchat_token = os.getenv("WEBCHAT_SERVICE_TOKEN", "")
+    webchat_poll_interval = os.getenv("WEBCHAT_POLL_INTERVAL")
+    webchat_public_base_url = os.getenv("WEBCHAT_PUBLIC_BASE_URL", "")
+    if webchat_enabled or webchat_url or webchat_token:
+        if Platform.WEBCHAT not in config.platforms:
+            config.platforms[Platform.WEBCHAT] = PlatformConfig()
+        config.platforms[Platform.WEBCHAT].enabled = True
+        if webchat_token:
+            config.platforms[Platform.WEBCHAT].token = webchat_token
+        if webchat_url:
+            config.platforms[Platform.WEBCHAT].extra["url"] = webchat_url
+        if webchat_public_base_url:
+            config.platforms[Platform.WEBCHAT].extra["public_base_url"] = webchat_public_base_url
+        if webchat_poll_interval:
+            try:
+                config.platforms[Platform.WEBCHAT].extra["poll_interval"] = float(webchat_poll_interval)
+            except ValueError:
+                pass
+
+    webchat_home = os.getenv("WEBCHAT_HOME_CHANNEL")
+    if webchat_home and Platform.WEBCHAT in config.platforms:
+        config.platforms[Platform.WEBCHAT].home_channel = HomeChannel(
+            platform=Platform.WEBCHAT,
+            chat_id=webchat_home,
+            name=os.getenv("WEBCHAT_HOME_CHANNEL_NAME", "Home"),
+        )
 
     # Webhook platform
     webhook_enabled = os.getenv("WEBHOOK_ENABLED", "").lower() in ("true", "1", "yes")

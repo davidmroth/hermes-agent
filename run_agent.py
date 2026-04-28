@@ -1784,7 +1784,14 @@ class AIAgent:
         self.session_estimated_cost_usd = 0.0
         self.session_cost_status = "unknown"
         self.session_cost_source = "none"
-        
+
+        # llama.cpp-style timings from the most recent LLM completion call this
+        # turn. Captured opportunistically when the upstream response (or final
+        # streaming chunk) carries a ``timings`` attribute. ``None`` for
+        # providers that don't emit it. "Last call wins" within a turn so the
+        # surfaced numbers reflect the user-visible final response.
+        self._last_response_timings: Optional[Dict[str, Any]] = None
+
         # ── Ollama num_ctx injection ──
         # Ollama defaults to 2048 context regardless of the model's capabilities.
         # When running against an Ollama server, detect the model's max context
@@ -3429,6 +3436,80 @@ class AIAgent:
                         context["reset_at"] = time.time() + float(sec_match.group(1))
 
         return context
+
+    def _extract_llamacpp_timings(self, source: Any) -> Optional[Dict[str, Any]]:
+        """Pull llama.cpp-style ``timings`` from a response or streaming chunk.
+
+        llama.cpp (and llama-server's OpenAI-compat shim) attaches a non-standard
+        ``timings`` object to chat-completion responses and to the final usage
+        chunk of a stream. Shape::
+
+            {
+              "prompt_n": int,         # tokens in the prompt
+              "prompt_ms": float,      # prompt-eval wall time
+              "predicted_n": int,      # tokens generated
+              "predicted_ms": float,   # generation wall time
+              "cache_n": int,          # optional, prompt tokens served from cache
+              # ...other prompt_per_*/predicted_per_* derived fields
+            }
+
+        Returns a plain dict (only the canonical keys we care about) or ``None``
+        when the source carries no timings. Defensive: tolerates pydantic
+        models, plain objects, dicts, and missing fields.
+        """
+        if source is None:
+            return None
+        raw = getattr(source, "timings", None)
+        if raw is None and isinstance(source, dict):
+            raw = source.get("timings")
+        if raw is None:
+            extra = getattr(source, "model_extra", None)
+            if isinstance(extra, dict):
+                raw = extra.get("timings")
+        if raw is None:
+            usage = getattr(source, "usage", None)
+            raw = getattr(usage, "timings", None)
+            if raw is None and isinstance(usage, dict):
+                raw = usage.get("timings")
+            if raw is None:
+                usage_extra = getattr(usage, "model_extra", None)
+                if isinstance(usage_extra, dict):
+                    raw = usage_extra.get("timings")
+        if raw is None:
+            dumped = None
+            dumper = getattr(source, "model_dump", None)
+            if callable(dumper):
+                try:
+                    dumped = dumper(mode="python")
+                except TypeError:
+                    try:
+                        dumped = dumper()
+                    except Exception:
+                        dumped = None
+                except Exception:
+                    dumped = None
+            if isinstance(dumped, dict):
+                raw = dumped.get("timings")
+                if raw is None:
+                    usage_dump = dumped.get("usage")
+                    if isinstance(usage_dump, dict):
+                        raw = usage_dump.get("timings")
+        if raw is None and hasattr(source, "__dict__"):
+            raw = getattr(source, "__dict__", {}).get("timings")
+        if raw is None:
+            return None
+
+        def _get(obj: Any, key: str) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
+
+        out: Dict[str, Any] = {}
+        for key in ("prompt_n", "prompt_ms", "predicted_n", "predicted_ms", "cache_n"):
+            val = _get(raw, key)
+            if val is not None:
+                out[key] = val
+        return out or None
 
     def _usage_summary_for_api_request_hook(self, response: Any) -> Optional[Dict[str, Any]]:
         """Token buckets for ``post_api_request`` plugins (no raw ``response`` object)."""
@@ -5277,6 +5358,13 @@ class AIAgent:
                 else:
                     request_client_holder["client"] = self._create_request_openai_client(reason="chat_completion_request")
                     result["response"] = request_client_holder["client"].chat.completions.create(**api_kwargs)
+                # Capture llama.cpp timings (no-op for other providers).
+                try:
+                    _t = self._extract_llamacpp_timings(result.get("response"))
+                    if _t is not None:
+                        self._last_response_timings = _t
+                except Exception as _te:
+                    logger.debug("timings extract (non-streaming) failed: %s", _te)
             except Exception as e:
                 result["error"] = e
             finally:
@@ -5648,6 +5736,7 @@ class AIAgent:
             role = "assistant"
             reasoning_parts: list = []
             usage_obj = None
+            timings_obj = None
             for chunk in stream:
                 last_chunk_time["t"] = time.time()
                 self._touch_activity("receiving stream response")
@@ -5661,6 +5750,13 @@ class AIAgent:
                     # Usage comes in the final chunk with empty choices
                     if hasattr(chunk, "usage") and chunk.usage:
                         usage_obj = chunk.usage
+                    # llama.cpp emits ``timings`` on the same final chunk
+                    try:
+                        _t = self._extract_llamacpp_timings(chunk)
+                        if _t is not None:
+                            timings_obj = _t
+                    except Exception:
+                        pass
                     continue
 
                 delta = chunk.choices[0].delta
@@ -5772,6 +5868,13 @@ class AIAgent:
                 # Usage in the final chunk
                 if hasattr(chunk, "usage") and chunk.usage:
                     usage_obj = chunk.usage
+                # llama.cpp may emit timings on the same final chunk
+                try:
+                    _t = self._extract_llamacpp_timings(chunk)
+                    if _t is not None:
+                        timings_obj = _t
+                except Exception:
+                    pass
 
             # Build mock response matching non-streaming shape
             full_content = "".join(content_parts) or None
@@ -5818,6 +5921,7 @@ class AIAgent:
                 model=model_name,
                 choices=[mock_choice],
                 usage=usage_obj,
+                timings=timings_obj,
             )
 
         def _call_anthropic():
@@ -5890,6 +5994,14 @@ class AIAgent:
                             result["response"] = _call_anthropic()
                         else:
                             result["response"] = _call_chat_completions()
+                        # Capture llama.cpp-style timings (no-op for providers
+                        # that don't emit them).
+                        try:
+                            _t = self._extract_llamacpp_timings(result.get("response"))
+                            if _t is not None:
+                                self._last_response_timings = _t
+                        except Exception as _te:
+                            logger.debug("timings extract (streaming) failed: %s", _te)
                         return  # success
                     except Exception as e:
                         _is_timeout = isinstance(
@@ -8658,6 +8770,11 @@ class AIAgent:
         # Guard stdio against OSError from broken pipes (systemd/headless/daemon).
         # Installed once, transparent when streams are healthy, prevents crash on write.
         _install_safe_stdio()
+
+        # Reset per-turn timings: we surface only the FINAL LLM call's timings
+        # to the UI, and we don't want stale timings from the previous turn to
+        # leak through if this turn's provider doesn't emit them.
+        self._last_response_timings = None
 
         # Tag all log records on this thread with the session ID so
         # ``hermes logs --session <id>`` can filter a single conversation.
@@ -11847,6 +11964,7 @@ class AIAgent:
             "final_response": final_response,
             "last_reasoning": last_reasoning,
             "messages": messages,
+            "timings": getattr(self, "_last_response_timings", None),
             "api_calls": api_call_count,
             "completed": completed,
             "partial": False,  # True only when stopped due to invalid tool calls

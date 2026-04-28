@@ -316,6 +316,7 @@ class TestBuiltinDiscovery:
             "tools.tts_tool",
             "tools.vision_tools",
             "tools.web_tools",
+            "tools.wiki_tool",
         }
 
         with patch("tools.registry.importlib.import_module"):

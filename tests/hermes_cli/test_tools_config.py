@@ -6,6 +6,7 @@ from hermes_cli.tools_config import (
     _DEFAULT_OFF_TOOLSETS,
     _apply_toolset_change,
     _configure_provider,
+    _get_enabled_platforms,
     _get_platform_tools,
     _platform_toolset_summary,
     _save_platform_tools,
@@ -39,6 +40,12 @@ def test_get_platform_tools_homeassistant_platform_keeps_homeassistant_toolset()
     enabled = _get_platform_tools({}, "homeassistant")
 
     assert "homeassistant" in enabled
+
+
+def test_get_platform_tools_default_webchat_includes_messaging():
+    enabled = _get_platform_tools({}, "webchat")
+
+    assert "messaging" in enabled
 
 
 def test_get_platform_tools_preserves_explicit_empty_selection():
@@ -95,6 +102,14 @@ def test_platform_toolset_summary_uses_explicit_platform_list():
 
     assert set(summary.keys()) == {"cli"}
     assert summary["cli"] == _get_platform_tools(config, "cli")
+
+
+def test_get_enabled_platforms_detects_webchat(monkeypatch):
+    monkeypatch.setenv("WEBCHAT_SERVICE_TOKEN", "svc-token")
+
+    enabled = _get_enabled_platforms()
+
+    assert "webchat" in enabled
 
 
 def test_get_platform_tools_includes_enabled_mcp_servers_by_default():

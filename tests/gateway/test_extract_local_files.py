@@ -268,9 +268,29 @@ class TestEdgeCases:
         assert paths == []
         assert cleaned == ""
 
-    def test_no_media_extensions(self):
-        """Non-media extensions should not be matched."""
-        paths, _ = _extract("See /tmp/data.csv and /tmp/script.py and /tmp/notes.txt")
+    def test_document_extensions_matched(self):
+        """Document extensions should be matched (delivered as attachments)."""
+        text = "See /tmp/data.csv and /tmp/script.py and /tmp/notes.txt"
+        paths, _ = _extract(text)
+        assert len(paths) == 3
+        assert "/tmp/data.csv" in paths
+        assert "/tmp/script.py" in paths
+        assert "/tmp/notes.txt" in paths
+
+    def test_markdown_file_matched(self):
+        """Markdown files should be detected and delivered."""
+        paths, cleaned = _extract("I saved the analysis to ~/.hermes/meeting_analysis.md for you")
+        assert paths == ["/home/user/.hermes/meeting_analysis.md"]
+        assert "~/.hermes/meeting_analysis.md" not in cleaned
+
+    def test_pdf_file_matched(self):
+        """PDF files should be detected and delivered."""
+        paths, _ = _extract("Here's the report /tmp/report.pdf")
+        assert paths == ["/tmp/report.pdf"]
+
+    def test_unsupported_extensions_not_matched(self):
+        """Truly unsupported extensions should not be matched."""
+        paths, _ = _extract("See /tmp/data.xyz and /tmp/file.abc and /tmp/thing.foo")
         assert paths == []
 
     def test_path_with_spaces_not_matched(self):

@@ -5,8 +5,11 @@ Instructions for AI coding assistants and developers working on the hermes-agent
 ## Development Environment
 
 ```bash
-# Prefer .venv; fall back to venv if that's what your checkout has.
+# Local development
 source .venv/bin/activate   # or: source venv/bin/activate
+
+# Containerized development
+docker compose  # See docker-compose.yml for details.
 ```
 
 `scripts/run_tests.sh` probes `.venv` first, then `venv`, then

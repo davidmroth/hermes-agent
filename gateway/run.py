@@ -1536,7 +1536,8 @@ class GatewayRunner:
             if not adapter:
                 return True
 
-            thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+            thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else {}
+            thread_meta["message_role"] = "system"
             if self._queue_during_drain_enabled():
                 self._queue_or_replace_pending_event(session_key, event)
                 message = f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
@@ -1615,7 +1616,8 @@ class GatewayRunner:
                 f"I'll respond to your message shortly."
             )
 
-        thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+        thread_meta = {"thread_id": event.source.thread_id} if event.source.thread_id else {}
+        thread_meta["message_role"] = "system"
         try:
             await adapter._send_with_retry(
                 chat_id=event.source.chat_id,
@@ -2902,6 +2904,13 @@ class GatewayRunner:
                 return None
             return APIServerAdapter(config)
 
+        elif platform == Platform.WEBCHAT:
+            from gateway.platforms.webchat import WebChatAdapter, check_webchat_requirements
+            if not check_webchat_requirements():
+                logger.warning("Webchat: httpx not installed")
+                return None
+            return WebChatAdapter(config)
+
         elif platform == Platform.WEBHOOK:
             from gateway.platforms.webhook import WebhookAdapter, check_webhook_requirements
             if not check_webhook_requirements():
@@ -2943,7 +2952,9 @@ class GatewayRunner:
         # connection, so HA events are always authorized.
         # Webhook events are authenticated via HMAC signature validation in
         # the adapter itself — no user allowlist applies.
-        if source.platform in (Platform.HOMEASSISTANT, Platform.WEBHOOK):
+        # Webchat events are authenticated by the web UI service using the
+        # shared service token before they reach Hermes.
+        if source.platform in (Platform.HOMEASSISTANT, Platform.WEBHOOK, Platform.WEBCHAT):
             return True
 
         user_id = source.user_id
@@ -2956,6 +2967,7 @@ class GatewayRunner:
             Platform.WHATSAPP: "WHATSAPP_ALLOWED_USERS",
             Platform.SLACK: "SLACK_ALLOWED_USERS",
             Platform.SIGNAL: "SIGNAL_ALLOWED_USERS",
+            Platform.WEBCHAT: "WEBCHAT_ALLOWED_USERS",
             Platform.EMAIL: "EMAIL_ALLOWED_USERS",
             Platform.SMS: "SMS_ALLOWED_USERS",
             Platform.MATTERMOST: "MATTERMOST_ALLOWED_USERS",
@@ -2977,6 +2989,7 @@ class GatewayRunner:
             Platform.WHATSAPP: "WHATSAPP_ALLOW_ALL_USERS",
             Platform.SLACK: "SLACK_ALLOW_ALL_USERS",
             Platform.SIGNAL: "SIGNAL_ALLOW_ALL_USERS",
+            Platform.WEBCHAT: "WEBCHAT_ALLOW_ALL_USERS",
             Platform.EMAIL: "EMAIL_ALLOW_ALL_USERS",
             Platform.SMS: "SMS_ALLOW_ALL_USERS",
             Platform.MATTERMOST: "MATTERMOST_ALLOW_ALL_USERS",
@@ -4036,6 +4049,55 @@ class GatewayRunner:
 
         return message_text
 
+    async def _load_history_for_event(self, session_entry, event, source):
+        history = self.session_store.load_transcript(session_entry.session_id)
+
+        if source.platform != Platform.WEBCHAT:
+            return history
+
+        raw_payload = event.raw_message if isinstance(event.raw_message, dict) else None
+        if not raw_payload:
+            return history
+
+        context_url = str(raw_payload.get("contextUrl") or "").strip()
+        if not context_url:
+            return history
+
+        adapter = self.adapters.get(Platform.WEBCHAT)
+        fetch_context = getattr(adapter, "fetch_conversation_context", None) if adapter else None
+        if not callable(fetch_context):
+            return history
+
+        try:
+            from gateway.platforms.webchat import build_webchat_context_transcript
+
+            context_payload = await fetch_context(context_url)
+            next_history = build_webchat_context_transcript(
+                context_payload or {},
+                exclude_message_id=event.message_id,
+            )
+            if not next_history:
+                return history
+
+            self.session_store.rewrite_transcript(session_entry.session_id, next_history)
+            marker = next_history[0].get("webchat_context") if next_history else None
+            logger.info(
+                "[gateway] Reconciled webchat session %s from page context chat=%s messages=%d curr_node=%s",
+                session_entry.session_id,
+                source.chat_id or "unknown",
+                max(0, len(next_history) - 1),
+                marker.get("currNode") if isinstance(marker, dict) else None,
+            )
+            return next_history
+        except Exception as exc:
+            logger.warning(
+                "[gateway] Failed to reconcile webchat context for chat=%s session=%s: %s",
+                source.chat_id or "unknown",
+                session_entry.session_id,
+                exc,
+            )
+            return history
+
     async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):
         """Inner handler that runs under the _running_agents sentinel guard."""
         _msg_start_time = time.time()
@@ -4184,7 +4246,7 @@ class GatewayRunner:
                 logger.warning("[Gateway] Failed to auto-load skill(s) %s: %s", _skill_names, e)
 
         # Load conversation history from transcript
-        history = self.session_store.load_transcript(session_entry.session_id)
+        history = await self._load_history_for_event(session_entry, event, source)
         
         # -----------------------------------------------------------------
         # Session hygiene: auto-compress pathologically large transcripts
@@ -4814,6 +4876,17 @@ class GatewayRunner:
                             response, event, _media_adapter,
                         )
                 return None
+
+            # Attach llama.cpp-style timings to the event so platform adapters
+            # (currently only webchat) can surface them to the UI alongside the
+            # final assistant message. Adapters that don't recognize the field
+            # silently ignore it.
+            try:
+                _timings = agent_result.get("timings")
+                if _timings:
+                    setattr(event, "_hermes_timings", _timings)
+            except Exception:
+                pass
 
             return response
             
@@ -9605,6 +9678,7 @@ class GatewayRunner:
         result_holder = [None]  # Mutable container for the result
         tools_holder = [None]   # Mutable container for the tool definitions
         stream_consumer_holder = [None]  # Mutable container for stream consumer
+        preview_send_future_holder = [None]  # Preview send result for post-turn timing reconciliation
         
         # Bridge sync step_callback → async hooks.emit for agent:step events
         _loop_for_step = asyncio.get_running_loop()
@@ -9641,9 +9715,46 @@ class GatewayRunner:
         _status_adapter = self.adapters.get(source.platform)
         _status_chat_id = source.chat_id
         _status_thread_metadata = {"thread_id": _progress_thread_id} if _progress_thread_id else None
+        _status_error_buffer: list[str] = []
+
+        def _is_bufferable_status_message(text: str) -> bool:
+            """Return True for retry/failure lifecycle lines worth collapsing.
+
+            WebChat displays each status callback as a standalone assistant
+            message. For retry storms this can flood the transcript with near-
+            duplicate lines. Buffer these lines and append them once to the
+            final failed response body.
+            """
+            normalized = (text or "").strip().lower()
+            if not normalized:
+                return False
+            markers = (
+                "retrying in",
+                "rate limit reached",
+                "max retries",
+                "api failed after",
+                "rate limited after",
+                "giving up",
+                "trying fallback",
+            )
+            return any(marker in normalized for marker in markers)
+
+        def _append_unique_status_line(text: str) -> None:
+            line = (text or "").strip()
+            if not line:
+                return
+            if line not in _status_error_buffer:
+                _status_error_buffer.append(line)
 
         def _status_callback_sync(event_type: str, message: str) -> None:
             if not _status_adapter or not _run_still_current():
+                return
+            if (
+                source.platform == Platform.WEBCHAT
+                and event_type == "lifecycle"
+                and _is_bufferable_status_message(message)
+            ):
+                _append_unique_status_line(message)
                 return
             try:
                 asyncio.run_coroutine_threadsafe(
@@ -9793,7 +9904,7 @@ class GatewayRunner:
                 if already_streamed or not _status_adapter or not str(text or "").strip():
                     return
                 try:
-                    asyncio.run_coroutine_threadsafe(
+                    preview_send_future_holder[0] = asyncio.run_coroutine_threadsafe(
                         _status_adapter.send(
                             _status_chat_id,
                             text,
@@ -10173,6 +10284,12 @@ class GatewayRunner:
 
             if not final_response:
                 error_msg = f"⚠️ {result['error']}" if result.get("error") else ""
+                if source.platform == Platform.WEBCHAT and _status_error_buffer:
+                    details = "\n".join(_status_error_buffer)
+                    if error_msg:
+                        error_msg = f"{error_msg}\n\nRetry details:\n{details}"
+                    else:
+                        error_msg = f"Retry details:\n{details}"
                 return {
                     "final_response": error_msg,
                     "messages": result.get("messages", []),
@@ -10221,6 +10338,11 @@ class GatewayRunner:
                     if has_voice_directive:
                         unique_tags.insert(0, "[[audio_as_voice]]")
                     final_response = final_response + "\n" + "\n".join(unique_tags)
+
+                if source.platform == Platform.WEBCHAT and _status_error_buffer and result.get("failed"):
+                    details = "\n".join(_status_error_buffer)
+                    if details not in final_response:
+                        final_response = f"{final_response}\n\nRetry details:\n{details}"
             
             # Sync session_id: the agent may have created a new session during
             # mid-run context compression (_compress_context splits sessions).
@@ -10266,6 +10388,7 @@ class GatewayRunner:
             return {
                 "final_response": final_response,
                 "last_reasoning": result.get("last_reasoning"),
+                "timings": result.get("timings"),
                 "messages": result_holder[0].get("messages", []) if result_holder[0] else [],
                 "api_calls": result_holder[0].get("api_calls", 0) if result_holder[0] else 0,
                 "tools": tools_holder[0] or [],
@@ -10858,6 +10981,40 @@ class GatewayRunner:
         # tool call, setting already_sent=True, but that text is NOT the
         # final answer.  Suppressing delivery here leaves the user staring
         # at silence.  (#10xxx — "agent stops after web search")
+        if (
+            isinstance(response, dict)
+            and response.get("response_previewed")
+            and response.get("timings")
+            and source.platform == Platform.WEBCHAT
+            and _status_adapter
+            and preview_send_future_holder[0] is not None
+        ):
+            try:
+                _preview_result = preview_send_future_holder[0].result(timeout=5.0)
+                _preview_message_id = getattr(_preview_result, "message_id", "") or ""
+                if _preview_message_id:
+                    _reconcile_metadata = dict(_status_thread_metadata or {})
+                    _reconcile_metadata["message_id"] = _preview_message_id
+                    _reconcile_metadata["timings"] = response.get("timings")
+                    _message_role = response.get("message_role")
+                    if _message_role in {"assistant", "system"}:
+                        _reconcile_metadata["message_role"] = _message_role
+                    _reconcile_result = await _status_adapter.send(
+                        _status_chat_id,
+                        response.get("final_response") or "",
+                        metadata=_reconcile_metadata,
+                    )
+                    if not getattr(_reconcile_result, "success", False):
+                        logger.warning(
+                            "Failed to reconcile previewed webchat reply %s with timings: %s",
+                            _preview_message_id,
+                            getattr(_reconcile_result, "error", "unknown error"),
+                        )
+                else:
+                    logger.debug("Previewed webchat reply had no message id; timings reconciliation skipped")
+            except Exception as _preview_err:
+                logger.debug("Could not reconcile previewed webchat timings: %s", _preview_err)
+
         _sc = stream_consumer_holder[0]
         if isinstance(response, dict) and not response.get("failed"):
             _final = response.get("final_response") or ""

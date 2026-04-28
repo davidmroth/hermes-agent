@@ -57,9 +57,11 @@ _HERMES_CORE_TOOLS = [
     # Cronjob management
     "cronjob",
     # Cross-platform messaging (gated on gateway running via check_fn)
-    "send_message",
+    "send_message", "send_file_to_webchat", "send_html_to_webchat",
     # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
     "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
+    # Wiki — persistent LLM-maintained knowledge base
+    "wiki",
 ]
 
 
@@ -128,7 +130,7 @@ TOOLSETS = {
     
     "messaging": {
         "description": "Cross-platform messaging: send messages to Telegram, Discord, Slack, SMS, etc.",
-        "tools": ["send_message"],
+        "tools": ["send_message", "send_file_to_webchat", "send_html_to_webchat"],
         "includes": []
     },
     
@@ -213,6 +215,12 @@ TOOLSETS = {
             "feishu_drive_list_comments", "feishu_drive_list_comment_replies",
             "feishu_drive_reply_comment", "feishu_drive_add_comment",
         ],
+        "includes": []
+    },
+
+    "wiki": {
+        "description": "Persistent LLM-maintained knowledge wiki (search, status, log)",
+        "tools": ["wiki"],
         "includes": []
     },
 
@@ -401,6 +409,12 @@ TOOLSETS = {
         "includes": []
     },
 
+    "hermes-webchat": {
+        "description": "Webchat toolset - browser chat channel backed by the web UI service",
+        "tools": _HERMES_CORE_TOOLS,
+        "includes": []
+    },
+
     "hermes-webhook": {
         "description": "Webhook toolset - receive and process external webhook events",
         "tools": _HERMES_CORE_TOOLS,
@@ -410,7 +424,7 @@ TOOLSETS = {
     "hermes-gateway": {
         "description": "Gateway toolset - union of all messaging platform tools",
         "tools": [],
-        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-bluebubbles", "hermes-homeassistant", "hermes-email", "hermes-sms", "hermes-mattermost", "hermes-matrix", "hermes-dingtalk", "hermes-feishu", "hermes-wecom", "hermes-wecom-callback", "hermes-weixin", "hermes-qqbot", "hermes-webhook"]
+        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-bluebubbles", "hermes-homeassistant", "hermes-email", "hermes-sms", "hermes-mattermost", "hermes-matrix", "hermes-dingtalk", "hermes-feishu", "hermes-wecom", "hermes-wecom-callback", "hermes-weixin", "hermes-qqbot", "hermes-webchat", "hermes-webhook"]
     }
 }
 

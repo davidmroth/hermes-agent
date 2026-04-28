@@ -1,0 +1,331 @@
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+
+from gateway.config import PlatformConfig
+from gateway.platforms.base import MessageEvent, MessageType, ProcessingOutcome
+from gateway.platforms.webchat import (
+    WebChatAdapter,
+    build_webchat_context_marker,
+    build_webchat_context_transcript,
+)
+
+
+class _Response:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def _build_adapter() -> WebChatAdapter:
+    config = PlatformConfig(enabled=True, token="svc-token", extra={"url": "http://webui:3000"})
+    return WebChatAdapter(config)
+
+
+@pytest.mark.asyncio
+async def test_fetch_event_does_not_ack_before_processing():
+    adapter = _build_adapter()
+    adapter._client = Mock()
+    adapter._client.get = AsyncMock(
+        return_value=_Response(
+            payload={
+                "eventId": "evt-123",
+                "conversationId": "conv-1",
+                "sessionChatId": "session-conv-1",
+                "contextUrl": "/api/internal/hermes/conversations/conv-1/context",
+                "chatType": "dm",
+                "userId": "user-1",
+                "text": "hello",
+                "attachments": [],
+            }
+        )
+    )
+    adapter._ack_event = AsyncMock()
+
+    event = await adapter._fetch_event()
+
+    assert event is not None
+    assert event.text == "hello"
+    assert event.message_type is MessageType.TEXT
+    assert event.source.chat_id == "session-conv-1"
+    assert event.raw_message["contextUrl"] == "http://webui:3000/api/internal/hermes/conversations/conv-1/context"
+    adapter._ack_event.assert_not_called()
+
+
+def test_build_webchat_context_transcript_uses_visible_branch_and_excludes_current_message():
+    payload = {
+        "schemaVersion": 1,
+        "exportedAt": "2026-04-25T12:00:00.000Z",
+        "conversation": {
+            "id": "conv-1",
+            "currNode": "assistant-2",
+            "lastModified": 42,
+        },
+        "visibleMessageIds": ["user-1", "assistant-1", "user-2", "assistant-2"],
+        "messages": [
+            {
+                "id": "user-1",
+                "role": "user",
+                "content": "Earlier question",
+                "createdAt": "2026-04-25T11:50:00.000Z",
+                "attachments": [],
+            },
+            {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": "Earlier answer",
+                "createdAt": "2026-04-25T11:51:00.000Z",
+                "attachments": [
+                    {
+                        "fileName": "report.pdf",
+                        "contentType": "application/pdf",
+                        "sizeBytes": 1234,
+                    }
+                ],
+            },
+            {
+                "id": "user-2",
+                "role": "user",
+                "content": "Newest inbound prompt",
+                "createdAt": "2026-04-25T11:59:00.000Z",
+                "attachments": [],
+            },
+            {
+                "id": "assistant-2",
+                "role": "system",
+                "content": "Hermes worker appears stalled.",
+                "createdAt": "2026-04-25T11:59:30.000Z",
+                "attachments": [],
+            },
+        ],
+    }
+
+    transcript = build_webchat_context_transcript(payload, exclude_message_id="user-2")
+
+    assert transcript[0]["role"] == "session_meta"
+    assert transcript[0]["webchat_context"] == build_webchat_context_marker(payload)
+    assert [message["role"] for message in transcript[1:]] == ["user", "assistant", "assistant"]
+    assert [message["content"] for message in transcript[1:]] == [
+        "Earlier question",
+        "Earlier answer\n\n[Attachments: report.pdf (application/pdf, 1234 bytes)]",
+        "[System status] Hermes worker appears stalled.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_conversation_context_resolves_relative_url():
+    adapter = _build_adapter()
+    adapter._client = Mock()
+    adapter._client.get = AsyncMock(
+        return_value=_Response(
+            payload={
+                "schemaVersion": 1,
+                "conversation": {"id": "conv-1", "currNode": "msg-2", "lastModified": 42},
+                "visibleMessageIds": [],
+                "messages": [],
+            }
+        )
+    )
+
+    payload = await adapter.fetch_conversation_context("/api/internal/hermes/conversations/conv-1/context")
+
+    assert payload is not None
+    adapter._client.get.assert_awaited_once_with(
+        "http://webui:3000/api/internal/hermes/conversations/conv-1/context",
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Bearer svc-token",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_on_processing_complete_acks_only_success():
+    adapter = _build_adapter()
+    adapter._ack_event = AsyncMock()
+    source = adapter.build_source(chat_id="conv-1", user_id="user-1")
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=source,
+        raw_message={"eventId": "evt-123"},
+    )
+
+    await adapter.on_processing_complete(event, ProcessingOutcome.FAILURE)
+    adapter._ack_event.assert_not_called()
+
+    await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
+    adapter._ack_event.assert_awaited_once_with("evt-123")
+
+
+@pytest.mark.asyncio
+async def test_send_document_posts_json_attachment(tmp_path):
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["url"] = url
+        posted["json"] = json
+        posted["headers"] = headers
+        return _Response(payload={"messageId": "msg-123"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    file_path = tmp_path / "report.md"
+    file_path.write_text("# Report\n", encoding="utf-8")
+
+    result = await adapter.send_document(
+        chat_id="conv-1",
+        file_path=str(file_path),
+        caption="Attached report",
+        file_name="final-report.md",
+    )
+
+    assert result.success is True
+    assert result.message_id == "msg-123"
+    assert posted["url"] == "http://webui:3000/api/internal/hermes/conversations/conv-1/assistant"
+    assert posted["headers"] == {
+        "Accept": "application/json",
+        "Authorization": "Bearer svc-token",
+    }
+    assert posted["json"]["content"] == "Attached report"
+    assert posted["json"]["attachments"][0]["fileName"] == "final-report.md"
+    assert posted["json"]["attachments"][0]["contentType"] == "text/markdown"
+    assert posted["json"]["attachments"][0]["base64Data"]
+    assert posted["json"]["senderTrace"]["route"] == "webchat_adapter"
+    assert posted["json"]["senderTrace"]["senderTargetUrl"] == posted["url"]
+    assert posted["json"]["senderTrace"]["attachmentCount"] == 1
+    assert posted["json"]["senderTrace"]["attachmentNames"] == ["final-report.md"]
+
+
+@pytest.mark.asyncio
+async def test_send_document_returns_retryable_error_when_post_fails(tmp_path):
+    adapter = _build_adapter()
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=RuntimeError("boom"))
+
+    file_path = tmp_path / "artifact.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    result = await adapter.send_document(chat_id="conv-1", file_path=str(file_path))
+
+    assert result.success is False
+    assert result.retryable is True
+    assert "Webchat file send failed" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_send_lifts_timings_metadata_to_top_level_payload():
+    """Webchat adapter should hoist llama.cpp timings out of metadata."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-42"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    timings = {
+        "prompt_n": 12,
+        "prompt_ms": 34.5,
+        "predicted_n": 7,
+        "predicted_ms": 89.0,
+        "cache_n": 0,
+    }
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="Hi there",
+        metadata={"thread_id": "t-1", "timings": timings},
+    )
+
+    assert result.success is True
+    assert posted["json"]["content"] == "Hi there"
+    # timings hoisted to top-level
+    assert posted["json"]["timings"] == timings
+    # metadata retained but timings stripped
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_omits_timings_when_metadata_only_has_timings():
+    """When metadata contained only timings, no metadata key is posted."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-43"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    await adapter.send(
+        chat_id="conv-1",
+        content="Hello",
+        metadata={"timings": {"prompt_n": 1, "prompt_ms": 2.0,
+                              "predicted_n": 3, "predicted_ms": 4.0}},
+    )
+
+    assert posted["json"]["timings"]["prompt_n"] == 1
+    assert "metadata" not in posted["json"]
+
+
+@pytest.mark.asyncio
+async def test_send_lifts_system_role_to_top_level_payload():
+    """Webchat adapter should hoist system-role transport metadata."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-44"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="⚡ Interrupting current task.",
+        metadata={"thread_id": "t-1", "message_role": "system"},
+    )
+
+    assert result.success is True
+    assert posted["json"]["role"] == "system"
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_uses_message_id_to_update_existing_assistant_message():
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-existing"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="Updated answer",
+        metadata={
+            "message_id": "msg-existing",
+            "thread_id": "t-1",
+            "timings": {"prompt_n": 2, "prompt_ms": 3.5},
+        },
+    )
+
+    assert result.success is True
+    assert posted["json"]["messageId"] == "msg-existing"
+    assert posted["json"]["timings"] == {"prompt_n": 2, "prompt_ms": 3.5}
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}

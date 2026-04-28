@@ -1,0 +1,88 @@
+# =============================================================================
+# Developer-local overrides
+# =============================================================================
+# Source volume mounts for hot-reload during development.
+# This file is auto-merged by `docker compose up`.
+
+services:
+  hermes:
+    environment:
+      - GATEWAY_ALLOW_ALL_USERS=true
+      - CAMOFOX_URL=http://camofox:9377
+      # AgentLens observability
+      - AGENTLENS_SERVER_URL=http://agentlens:8500
+      - PYTHONPATH=/workspace:/opt/hermes:/opt/agentlens-sdk
+    volumes:
+      - .data/hermes:/opt/data
+      # AgentLens SDK — makes `from sdk import AgentLensClient` work
+      - ../agentlens:/opt/agentlens-sdk
+      #- /usr/bin/docker:/usr/bin/docker
+      #- /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      # Point to the actual IP of your llama.cpp server.
+      # Change this if ai.local moves to a different IP.
+      - "ai.local:192.168.87.153"
+    depends_on:
+      camofox:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Camofox — Local anti-detection browser (Firefox/Camoufox)
+  # Provides browser automation with C++ fingerprint spoofing.
+  # Hermes browser tools auto-route through Camofox when CAMOFOX_URL is set.
+  #
+  # First-time setup:
+  #   git clone https://github.com/jo-inc/camofox-browser .data/camofox-browser
+  #   cd .data/camofox-browser && make fetch
+  #   cd ../.. && docker compose build camofox
+  # ---------------------------------------------------------------------------
+  camofox:
+    build:
+      context: .data/camofox-browser
+      dockerfile: Dockerfile
+      args:
+        ARCH: x86_64
+        CAMOUFOX_VERSION: "135.0.1"
+        CAMOUFOX_RELEASE: "beta.24"
+    restart: unless-stopped
+    environment:
+      - CAMOFOX_PORT=9377
+      # Persistent browser profiles — Camofox maps userId → profile dir.
+      # Enable managed_persistence in config.yaml for Hermes to send stable IDs.
+      - CAMOFOX_PROFILE_DIR=/data/profiles
+      # Tune for single-agent use (lower resource footprint)
+      - MAX_SESSIONS=10
+      - MAX_TABS_PER_SESSION=5
+      - SESSION_TIMEOUT_MS=1800000
+      - BROWSER_IDLE_TIMEOUT_MS=300000
+    volumes:
+      - .data/camofox:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9377/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+#networks:
+#  agentlens_default:
+#    external: true
+
+  hermes-hud:
+    build:
+      context: ../hermes-hud
+      dockerfile: Dockerfile
+    profiles:
+      - hud
+    environment:
+      - HERMES_HOME=/opt/data
+    volumes:
+      - .data/hermes:/opt/data
+      - ../hermes-hud:/opt/hermes-hud
+    stdin_open: true
+    tty: true

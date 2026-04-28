@@ -310,6 +310,7 @@ def show_status(args):
         "Discord": ("DISCORD_BOT_TOKEN", "DISCORD_HOME_CHANNEL"),
         "WhatsApp": ("WHATSAPP_ENABLED", None),
         "Signal": ("SIGNAL_HTTP_URL", "SIGNAL_HOME_CHANNEL"),
+        "Webchat": ("WEBCHAT_SERVICE_TOKEN", "WEBCHAT_HOME_CHANNEL"),
         "Slack": ("SLACK_BOT_TOKEN", None),
         "Email": ("EMAIL_ADDRESS", "EMAIL_HOME_ADDRESS"),
         "SMS": ("TWILIO_ACCOUNT_SID", "SMS_HOME_CHANNEL"),

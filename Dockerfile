@@ -43,6 +43,11 @@ RUN cd web && npm run build
 
 # ---------- Python virtualenv ----------
 RUN chown hermes:hermes /opt/hermes
+
+# For docker that is already defined on the host, we create a group with the same GID
+RUN groupadd -g 990 docker
+RUN usermod -aG docker hermes
+
 USER hermes
 RUN uv venv && \
     uv pip install --no-cache-dir -e ".[all]"

@@ -1619,6 +1619,9 @@ def _load_mcp_config() -> Dict[str, dict]:
         config = load_config()
         servers = config.get("mcp_servers")
         if not servers or not isinstance(servers, dict):
+            servers = {}
+            
+        if not servers:
             return {}
         # Ensure .env vars are available for interpolation
         try:
