@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -11,7 +12,7 @@ from gateway.platforms.webchat import (
     build_webchat_context_transcript,
 )
 from gateway.run import GatewayRunner
-from gateway.session import SessionSource
+from gateway.session import SessionSource, build_session_key
 
 
 class _Response:
@@ -233,6 +234,53 @@ async def test_on_processing_complete_acks_only_success():
 
     await adapter.on_processing_complete(event, ProcessingOutcome.SUCCESS)
     adapter._ack_event.assert_awaited_once_with("evt-123")
+
+
+@pytest.mark.asyncio
+async def test_on_processing_complete_acks_superseded_cancelled_event():
+    adapter = _build_adapter()
+    adapter._ack_event = AsyncMock()
+    source = adapter.build_source(chat_id="conv-1", user_id="user-1")
+    session_key = build_session_key(
+        source,
+        group_sessions_per_user=adapter.config.extra.get("group_sessions_per_user", True),
+        thread_sessions_per_user=adapter.config.extra.get("thread_sessions_per_user", False),
+    )
+    adapter._active_sessions[session_key] = asyncio.Event()
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=source,
+        raw_message={"eventId": "evt-456"},
+    )
+
+    await adapter.on_processing_complete(event, ProcessingOutcome.CANCELLED)
+
+    adapter._ack_event.assert_awaited_once_with("evt-456")
+
+
+@pytest.mark.asyncio
+async def test_on_processing_complete_leaves_shutdown_cancelled_event_unacked():
+    adapter = _build_adapter()
+    adapter._ack_event = AsyncMock()
+    source = adapter.build_source(chat_id="conv-1", user_id="user-1")
+    session_key = build_session_key(
+        source,
+        group_sessions_per_user=adapter.config.extra.get("group_sessions_per_user", True),
+        thread_sessions_per_user=adapter.config.extra.get("thread_sessions_per_user", False),
+    )
+    adapter._active_sessions[session_key] = asyncio.Event()
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=source,
+        raw_message={"eventId": "evt-789"},
+    )
+    adapter._session_tasks[session_key] = asyncio.current_task()
+
+    await adapter.on_processing_complete(event, ProcessingOutcome.CANCELLED)
+
+    adapter._ack_event.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,7 @@ from gateway.platforms.base import (
     cache_document_from_bytes,
     cache_image_from_bytes,
 )
+from gateway.session import build_session_key
 
 logger = logging.getLogger(__name__)
 
@@ -705,10 +706,35 @@ class WebChatAdapter(BasePlatformAdapter):
         response = await self._client.post(f"{self._base_url}/api/internal/hermes/events/{event_id}/ack", headers=self._headers())
         response.raise_for_status()
 
+    def _cancelled_event_was_superseded(self, event: MessageEvent) -> bool:
+        current_task = asyncio.current_task()
+        if current_task is None or event.source is None:
+            return False
+
+        session_key = build_session_key(
+            event.source,
+            group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
+            thread_sessions_per_user=self.config.extra.get("thread_sessions_per_user", False),
+        )
+        if session_key not in self._active_sessions:
+            return False
+
+        owner_task = self._session_tasks.get(session_key)
+        return owner_task is not current_task
+
     async def on_processing_complete(self, event: MessageEvent, outcome: ProcessingOutcome) -> None:
         payload = event.raw_message if isinstance(event.raw_message, dict) else {}
         event_id = payload.get("eventId")
         if not event_id:
+            return
+
+        if outcome is ProcessingOutcome.CANCELLED and self._cancelled_event_was_superseded(event):
+            logger.info(
+                "[%s] Acknowledging superseded cancelled event %s",
+                self.name,
+                event_id,
+            )
+            await self._ack_event(str(event_id))
             return
 
         if outcome is not ProcessingOutcome.SUCCESS:
