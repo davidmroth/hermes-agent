@@ -16,7 +16,7 @@ import socket
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from uuid import uuid4
 
 try:
@@ -269,11 +269,10 @@ class WebChatAdapter(BasePlatformAdapter):
         self._next_command_sync_at = 0.0
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
-        # Reconnection tracking — retry transient connection failures
-        # with exponential back-off so brief web UI restarts don't
-        # permanently break the adapter.
+        # Reconnection tracking: retry transient connection failures with
+        # exponential back-off so brief web UI restarts do not permanently
+        # break the adapter.
         self._reconnect_attempt = 0
-        self._reconnect_task: Optional[asyncio.Task] = None
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -476,62 +475,17 @@ class WebChatAdapter(BasePlatformAdapter):
     def truncate_message(
         content: str,
         max_length: int = 65536,
-        len_fn: Optional["Callable[[str], int]"] = None,
+        len_fn: Optional[Callable[[str], int]] = None,
     ) -> list[str]:
         """Split a long message into chunks.
 
         The web UI has no hard message length limit, but we still chunk
-        at 64 KB to avoid sending extremely large payloads in a single
-        HTTP request.  Chunks are split at code block boundaries to
-        preserve formatting.
+        large streaming updates to avoid sending extremely large payloads
+        in a single HTTP request.  Reuse the base implementation so code
+        fences, inline code, custom length functions, and chunk indicators
+        stay consistent across platforms.
         """
-        _len = len_fn or len
-        if _len(content) <= max_length:
-            return [content]
-
-        INDICATOR_RESERVE = 10
-        FENCE_CLOSE = "\n```"
-
-        chunks: list[str] = []
-        remaining = content
-        carry_lang: Optional[str] = None
-
-        while remaining:
-            prefix = f"```{carry_lang}\n" if carry_lang is not None else ""
-            chunk = remaining[: max_length - len(prefix) - INDICATOR_RESERVE]
-
-            # If we're mid-code-block, close the fence on this chunk
-            if carry_lang is not None:
-                chunk = prefix + chunk
-
-            # Try to find a good break point at a blank line
-            break_pos = chunk.rfind("\n\n")
-            if break_pos > max_length // 4:
-                chunk = chunk[:break_pos]
-            elif FENCE_CLOSE in chunk:
-                # Split at the last code fence
-                fence_pos = chunk.rfind(FENCE_CLOSE) + len(FENCE_CLOSE)
-                chunk = chunk[:fence_pos]
-                carry_lang = None
-            else:
-                # Hard split — look for a newline
-                newline_pos = chunk.rfind("\n")
-                if newline_pos > max_length // 4:
-                    chunk = chunk[:newline_pos]
-                carry_lang = None
-
-            indicator = f" ({len(chunks) + 1}/{0})"  # final count unknown
-            if len(chunk) + len(indicator) > max_length:
-                chunk = chunk[: max_length - len(indicator)]
-
-            chunk = chunk.rstrip()
-            if chunk:
-                chunks.append(chunk)
-
-            remaining = remaining[len(chunk):]
-            carry_lang = None  # won't carry across chunks without a fence
-
-        return chunks
+        return BasePlatformAdapter.truncate_message(content, max_length=max_length, len_fn=len_fn)
 
     def _build_sender_trace(
         self,
@@ -759,7 +713,7 @@ class WebChatAdapter(BasePlatformAdapter):
                         return  # reconnect failed or was cancelled
                     consecutive_errors = 0
                     continue
-                # Transient error — brief back-off before retry
+                # Transient error: brief back-off before retry.
                 backoff = min(ERROR_BACKOFF_BASE * (2 ** (consecutive_errors - 1)), ERROR_BACKOFF_MAX)
                 logger.warning(
                     "[%s] Poll error %d/%d: %s (retry in %.1fs)",
@@ -770,9 +724,9 @@ class WebChatAdapter(BasePlatformAdapter):
     async def _attempt_reconnect(self) -> None:
         """Attempt to reconnect to the web UI after a connection failure.
 
-        Closes the existing client, creates a new one, and retries the
-        health check.  If successful the poll loop continues; if not the
-        adapter stays disconnected and the gateway will retry on restart.
+        Closes the existing client, creates a new one, and retries the health
+        check.  The current poll loop resumes after a successful reconnect;
+        this method deliberately does not create another poll task.
         """
         if self._client is not None:
             try:
@@ -784,7 +738,6 @@ class WebChatAdapter(BasePlatformAdapter):
         self._mark_disconnected()
         self._reconnect_attempt += 1
 
-        # Retry with exponential back-off
         max_retries = 4
         for attempt in range(1, max_retries + 1):
             try:
@@ -795,17 +748,20 @@ class WebChatAdapter(BasePlatformAdapter):
                 )
                 response.raise_for_status()
                 self._mark_connected()
-                # Restart the poll loop
-                self._poll_task = asyncio.create_task(self._poll_loop())
-                self._background_tasks.add(self._poll_task)
-                self._poll_task.add_done_callback(self._background_tasks.discard)
+                await self._sync_slash_commands(force=True)
                 logger.info(
                     "[%s] Reconnected to %s on attempt %d",
                     self.name, self._base_url, attempt,
                 )
-                self._reconnect_attempt = 0  # reset on success
+                self._reconnect_attempt = 0
                 return
             except Exception as exc:
+                if self._client is not None:
+                    try:
+                        await self._client.aclose()
+                    except Exception:
+                        pass
+                    self._client = None
                 if attempt < max_retries:
                     wait = min(2 ** attempt, 10)
                     logger.warning(

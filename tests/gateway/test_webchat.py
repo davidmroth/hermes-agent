@@ -45,6 +45,51 @@ def _build_runner_with_history(stored_history, fetched_payload):
     return runner
 
 
+def test_truncate_message_uses_base_chunking_without_placeholder_counts():
+    content = "Intro\n\n" + "hello world " * 30 + "\n\n```python\nprint('hello')\n```"
+
+    chunks = WebChatAdapter.truncate_message(content, max_length=80)
+
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 80 for chunk in chunks)
+    assert not any("/0)" in chunk for chunk in chunks)
+    assert chunks[-1].endswith(f"/{len(chunks)})")
+
+
+@pytest.mark.asyncio
+async def test_attempt_reconnect_reuses_existing_poll_loop(monkeypatch):
+    adapter = _build_adapter()
+    old_client = Mock()
+    old_client.aclose = AsyncMock()
+    adapter._client = old_client
+    adapter._poll_task = None
+
+    new_client = Mock()
+    new_client.get = AsyncMock(return_value=_Response())
+    new_client.post = AsyncMock(return_value=_Response())
+    new_client.aclose = AsyncMock()
+
+    monkeypatch.setattr(
+        "gateway.platforms.webchat.httpx.AsyncClient",
+        lambda timeout: new_client,
+    )
+
+    await adapter._attempt_reconnect()
+
+    assert adapter.is_connected is True
+    assert adapter._client is new_client
+    assert adapter._poll_task is None
+    assert not adapter._background_tasks
+    old_client.aclose.assert_awaited_once()
+    new_client.get.assert_awaited_once_with(
+        "http://webui:3000/api/internal/hermes/health",
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Bearer svc-token",
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_fetch_event_does_not_ack_before_processing():
     adapter = _build_adapter()
