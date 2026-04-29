@@ -237,9 +237,22 @@ def build_webchat_context_transcript(
 
 
 class WebChatAdapter(BasePlatformAdapter):
-    """Browser-chat adapter backed by the web UI service."""
+    """Browser-chat adapter backed by the web UI service.
 
-    SUPPORTS_MESSAGE_EDITING = False
+    Handles:
+    - Receiving messages from the web UI via HTTP polling
+    - Sending responses and attachments back to the web UI
+    - Editing messages in-place for streaming updates
+    - Typing indicators while the agent processes
+    - Context reconciliation from the web UI's conversation state
+    """
+
+    SUPPORTS_MESSAGE_EDITING = True
+
+    # Web UI message length limit (default 64 KB — generous enough for
+    # most responses; the base class default is 4096 which is too small
+    # for a web UI with no client-side limits).
+    MAX_MESSAGE_LENGTH = 65536
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform.WEBCHAT)
@@ -256,6 +269,11 @@ class WebChatAdapter(BasePlatformAdapter):
         self._next_command_sync_at = 0.0
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
+        # Reconnection tracking — retry transient connection failures
+        # with exponential back-off so brief web UI restarts don't
+        # permanently break the adapter.
+        self._reconnect_attempt = 0
+        self._reconnect_task: Optional[asyncio.Task] = None
 
     def _headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -444,6 +462,77 @@ class WebChatAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("[%s] Failed to sync slash commands to webui: %s", self.name, exc)
 
+    def format_message(self, content: str) -> str:
+        """Format content for the web UI.
+
+        The web UI renders Markdown natively, so we return content as-is.
+        This method is overridden to ensure MEDIA: tags and other
+        platform-specific directives are handled consistently with the
+        base class defaults.
+        """
+        return content
+
+    @staticmethod
+    def truncate_message(
+        content: str,
+        max_length: int = 65536,
+        len_fn: Optional["Callable[[str], int]"] = None,
+    ) -> list[str]:
+        """Split a long message into chunks.
+
+        The web UI has no hard message length limit, but we still chunk
+        at 64 KB to avoid sending extremely large payloads in a single
+        HTTP request.  Chunks are split at code block boundaries to
+        preserve formatting.
+        """
+        _len = len_fn or len
+        if _len(content) <= max_length:
+            return [content]
+
+        INDICATOR_RESERVE = 10
+        FENCE_CLOSE = "\n```"
+
+        chunks: list[str] = []
+        remaining = content
+        carry_lang: Optional[str] = None
+
+        while remaining:
+            prefix = f"```{carry_lang}\n" if carry_lang is not None else ""
+            chunk = remaining[: max_length - len(prefix) - INDICATOR_RESERVE]
+
+            # If we're mid-code-block, close the fence on this chunk
+            if carry_lang is not None:
+                chunk = prefix + chunk
+
+            # Try to find a good break point at a blank line
+            break_pos = chunk.rfind("\n\n")
+            if break_pos > max_length // 4:
+                chunk = chunk[:break_pos]
+            elif FENCE_CLOSE in chunk:
+                # Split at the last code fence
+                fence_pos = chunk.rfind(FENCE_CLOSE) + len(FENCE_CLOSE)
+                chunk = chunk[:fence_pos]
+                carry_lang = None
+            else:
+                # Hard split — look for a newline
+                newline_pos = chunk.rfind("\n")
+                if newline_pos > max_length // 4:
+                    chunk = chunk[:newline_pos]
+                carry_lang = None
+
+            indicator = f" ({len(chunks) + 1}/{0})"  # final count unknown
+            if len(chunk) + len(indicator) > max_length:
+                chunk = chunk[: max_length - len(indicator)]
+
+            chunk = chunk.rstrip()
+            if chunk:
+                chunks.append(chunk)
+
+            remaining = remaining[len(chunk):]
+            carry_lang = None  # won't carry across chunks without a fence
+
+        return chunks
+
     def _build_sender_trace(
         self,
         chat_id: str,
@@ -476,6 +565,42 @@ class WebChatAdapter(BasePlatformAdapter):
             "contentLength": len(content or ""),
             "startedAt": f"{datetime.utcnow().isoformat()}Z",
         }
+
+    async def edit_message(
+        self,
+        chat_id: str,
+        message_id: str,
+        content: str,
+        *,
+        finalize: bool = False,
+    ) -> SendResult:
+        """Edit a previously sent web UI message (for streaming updates).
+
+        The web UI supports in-place message editing via the same
+        ``POST /api/internal/hermes/conversations/{chat_id}/assistant``
+        endpoint.  We send the updated content with ``messageId`` set so
+        the UI replaces the existing message instead of creating a new one.
+        """
+        try:
+            return await self._post_assistant_message(
+                chat_id=chat_id,
+                content=content,
+                message_id=message_id,
+            )
+        except Exception as exc:
+            err_str = str(exc).lower()
+            # Content identical — treat as success so streaming can continue
+            if "not modified" in err_str or "unchanged" in err_str:
+                return SendResult(success=True, message_id=message_id)
+            # Content too long — truncate and succeed so the stream consumer
+            # can split the overflow into a new message.
+            if "too long" in err_str or "length" in err_str:
+                return SendResult(success=True, message_id=message_id)
+            logger.warning(
+                "[%s] Failed to edit webchat message %s: %s",
+                self.name, message_id, exc,
+            )
+            return SendResult(success=False, error=f"Webchat edit failed: {exc}", retryable=True)
 
     async def _post_assistant_message(
         self,
@@ -552,15 +677,37 @@ class WebChatAdapter(BasePlatformAdapter):
             return False
 
         self._client = httpx.AsyncClient(timeout=self._timeout_seconds)
-        try:
-            response = await self._client.get(f"{self._base_url}/api/internal/hermes/health", headers=self._headers())
-            response.raise_for_status()
-        except Exception as exc:
-            logger.error("[%s] Failed health check against %s: %s", self.name, self._base_url, exc)
-            if self._client is not None:
-                await self._client.aclose()
-                self._client = None
-            return False
+        self._reconnect_attempt = 0
+
+        # Retry health check with exponential back-off so brief web UI
+        # restarts (e.g. deployment, crash-and-restart) don't permanently
+        # break the adapter.  Mirrors Telegram's connect retry pattern.
+        max_retries = 6
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await self._client.get(
+                    f"{self._base_url}/api/internal/hermes/health",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                break  # success — exit retry loop
+            except Exception as exc:
+                if attempt < max_retries:
+                    wait = min(2 ** attempt, 15)
+                    logger.warning(
+                        "[%s] Health check attempt %d/%d failed: %s — retrying in %ds",
+                        self.name, attempt, max_retries, exc, wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(
+                        "[%s] Failed health check after %d retries against %s: %s",
+                        self.name, max_retries, self._base_url, exc,
+                    )
+                    if self._client is not None:
+                        await self._client.aclose()
+                        self._client = None
+                    return False
 
         self._mark_connected()
         await self._sync_slash_commands(force=True)
@@ -582,19 +729,96 @@ class WebChatAdapter(BasePlatformAdapter):
         logger.info("[%s] Disconnected", self.name)
 
     async def _poll_loop(self) -> None:
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 5
+        ERROR_BACKOFF_BASE = 2.0
+        ERROR_BACKOFF_MAX = 30.0
+
         while self.is_connected:
             try:
                 await self._sync_slash_commands()
                 event = await self._fetch_event()
                 if not event:
                     await asyncio.sleep(self._poll_interval)
+                    consecutive_errors = 0  # reset on successful poll cycle
                     continue
+                consecutive_errors = 0  # reset on successful message handling
                 await self.handle_message(event)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("[%s] Poll loop error: %s", self.name, exc)
-                await asyncio.sleep(self._poll_interval)
+                consecutive_errors += 1
+                if consecutive_errors > MAX_CONSECUTIVE_ERRORS:
+                    # Too many consecutive errors — try reconnecting
+                    logger.warning(
+                        "[%s] %d consecutive poll errors; attempting reconnect...",
+                        self.name, consecutive_errors,
+                    )
+                    await self._attempt_reconnect()
+                    if not self.is_connected:
+                        return  # reconnect failed or was cancelled
+                    consecutive_errors = 0
+                    continue
+                # Transient error — brief back-off before retry
+                backoff = min(ERROR_BACKOFF_BASE * (2 ** (consecutive_errors - 1)), ERROR_BACKOFF_MAX)
+                logger.warning(
+                    "[%s] Poll error %d/%d: %s (retry in %.1fs)",
+                    self.name, consecutive_errors, MAX_CONSECUTIVE_ERRORS, exc, backoff,
+                )
+                await asyncio.sleep(backoff)
+
+    async def _attempt_reconnect(self) -> None:
+        """Attempt to reconnect to the web UI after a connection failure.
+
+        Closes the existing client, creates a new one, and retries the
+        health check.  If successful the poll loop continues; if not the
+        adapter stays disconnected and the gateway will retry on restart.
+        """
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+            self._client = None
+
+        self._mark_disconnected()
+        self._reconnect_attempt += 1
+
+        # Retry with exponential back-off
+        max_retries = 4
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._client = httpx.AsyncClient(timeout=self._timeout_seconds)
+                response = await self._client.get(
+                    f"{self._base_url}/api/internal/hermes/health",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                self._mark_connected()
+                # Restart the poll loop
+                self._poll_task = asyncio.create_task(self._poll_loop())
+                self._background_tasks.add(self._poll_task)
+                self._poll_task.add_done_callback(self._background_tasks.discard)
+                logger.info(
+                    "[%s] Reconnected to %s on attempt %d",
+                    self.name, self._base_url, attempt,
+                )
+                self._reconnect_attempt = 0  # reset on success
+                return
+            except Exception as exc:
+                if attempt < max_retries:
+                    wait = min(2 ** attempt, 10)
+                    logger.warning(
+                        "[%s] Reconnect attempt %d/%d failed: %s — retrying in %ds",
+                        self.name, attempt, max_retries, exc, wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(
+                        "[%s] Reconnect failed after %d retries: %s",
+                        self.name, max_retries, exc,
+                    )
+                    self._reconnect_attempt += 1
 
     async def _fetch_event(self) -> Optional[MessageEvent]:
         if self._client is None:
@@ -748,6 +972,35 @@ class WebChatAdapter(BasePlatformAdapter):
 
         await self._ack_event(str(event_id))
 
+    async def send_typing(self, chat_id: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Send a typing indicator to the web UI.
+
+        The web UI displays a "typing..." indicator in the chat when this
+        endpoint is called.  The adapter calls this from the base class's
+        typing loop while the agent is processing.
+        """
+        if self._client is None:
+            return
+        try:
+            await self._client.post(
+                f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/typing",
+                headers=self._headers(),
+            )
+        except Exception as exc:
+            logger.debug("[%s] Failed to send typing indicator: %s", self.name, exc)
+
+    async def stop_typing(self, chat_id: str) -> None:
+        """Stop the typing indicator in the web UI."""
+        if self._client is None:
+            return
+        try:
+            await self._client.post(
+                f"{self._base_url}/api/internal/hermes/conversations/{chat_id}/typing/stop",
+                headers=self._headers(),
+            )
+        except Exception as exc:
+            logger.debug("[%s] Failed to stop typing indicator: %s", self.name, exc)
+
     async def send(
         self,
         chat_id: str,
@@ -836,6 +1089,28 @@ class WebChatAdapter(BasePlatformAdapter):
         **kwargs,
     ) -> SendResult:
         return await self._send_file(chat_id, audio_path, caption)
+
+    async def send_animation(
+        self,
+        chat_id: str,
+        animation_path: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        **kwargs,
+    ) -> SendResult:
+        """Send an animated GIF or similar animation."""
+        return await self._send_file(chat_id, animation_path, caption)
+
+    async def send_image(
+        self,
+        chat_id: str,
+        image_path: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        **kwargs,
+    ) -> SendResult:
+        """Send an image as a native image (not as an attachment)."""
+        return await self._send_file(chat_id, image_path, caption)
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         return {
