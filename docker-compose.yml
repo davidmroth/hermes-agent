@@ -107,7 +107,7 @@ services:
     depends_on:
       - hermes
     ports:
-      - "127.0.0.1:9119:9119"
+      - "9119:9119"
     volumes:
       # Workspace for the embedded dashboard chat/TUI.
       - .data/hermes:/opt/data
