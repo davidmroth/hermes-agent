@@ -10,7 +10,7 @@ The package has two independent pieces:
   rounded card chrome, light header/sidebar surfaces, and the `cockpit` layout
   variant.
 - `dashboard/` is a hidden slot-only plugin that fills the cockpit sidebar,
-  header-left, header-banner, and footer-right slots with task-dashboard chrome.
+  header-banner, and footer-right slots with real dashboard status chrome.
 
 No dashboard source files need to be patched. The plugin bundle is a plain IIFE
 and uses `window.__HERMES_PLUGIN_SDK__`, so it does not need React or a bundler.

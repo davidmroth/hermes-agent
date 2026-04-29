@@ -2,10 +2,8 @@
  * Task Management Dashboard - slot-only Hermes dashboard plugin.
  *
  * The paired task-management theme supplies the readable light palette and
- * cockpit layout. This plugin fills the shell slots with productivity chrome:
- * a project sidebar, a compact header summary, a small brand mark, and a calm
- * footer status line. It uses only the dashboard SDK, so it can be dropped into
- * ~/.hermes/plugins without a build step.
+ * cockpit layout. This plugin fills the shell slots with real dashboard status
+ * chrome only: a sidebar, compact header summary, and footer status line.
  */
 (function () {
   "use strict";
@@ -15,7 +13,7 @@
   if (!SDK || !PLUGINS || !PLUGINS.registerSlot) return;
 
   const { React } = SDK;
-  const { useEffect, useMemo, useState } = SDK.hooks;
+  const { useEffect, useState } = SDK.hooks;
   const { api } = SDK;
 
   const NAME = "task-management-dashboard";
@@ -28,19 +26,12 @@
     blue: "#3e69ff",
     green: "#12b886",
     amber: "#f59f00",
-    red: "#ef4444",
-    surface: "rgba(255, 255, 255, 0.82)",
+    surface: "rgba(255, 255, 255, 0.84)",
   };
 
   function el(type, props) {
     const children = Array.prototype.slice.call(arguments, 2);
     return React.createElement(type, props || null, ...children);
-  }
-
-  function cssVar(name, fallback) {
-    if (typeof document === "undefined") return fallback || "";
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback || "";
   }
 
   function isTaskThemeActive() {
@@ -74,9 +65,7 @@
       }
       return function () {
         if (observer) observer.disconnect();
-        if (typeof window !== "undefined") {
-          window.removeEventListener("storage", update);
-        }
+        if (typeof window !== "undefined") window.removeEventListener("storage", update);
       };
     }, []);
     return active;
@@ -98,55 +87,20 @@
     return status;
   }
 
-  function statCounts(status) {
-    const activeSessions = Array.isArray(status && status.active_sessions)
-      ? status.active_sessions.length
-      : 0;
-    const connectedPlatforms = Array.isArray(status && status.connected_platforms)
-      ? status.connected_platforms.length
-      : 0;
-    const gatewayOnline = Boolean(status && status.gateway_online);
+  function counts(status) {
+    const platformMap = status && status.gateway_platforms && typeof status.gateway_platforms === "object"
+      ? status.gateway_platforms
+      : {};
+    const gatewayOnline = Boolean(status && (status.gateway_running || status.gateway_state === "running"));
     return {
-      activeSessions,
-      connectedPlatforms,
+      activeSessions: typeof (status && status.active_sessions) === "number" ? status.active_sessions : 0,
+      platformCount: Object.keys(platformMap).length,
+      platforms: Object.entries(platformMap).slice(0, 5),
       gatewayOnline,
-      todayFocus: Math.min(100, 64 + activeSessions * 8 + (gatewayOnline ? 10 : 0)),
-      queueHealth: Math.min(100, 74 + connectedPlatforms * 6),
+      gatewayLabel: status ? (gatewayOnline ? "Online" : "Offline") : "Loading",
+      version: status && status.version ? "v" + status.version : "unknown",
+      updatedAt: status && status.gateway_updated_at ? status.gateway_updated_at : "No recent gateway update",
     };
-  }
-
-  function ProgressLine(props) {
-    const color = props.color || COLORS.blue;
-    return el(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: 7 } },
-      el(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 } },
-        el("span", { style: { color: COLORS.ink, fontWeight: 700, fontSize: 12 } }, props.label),
-        el("span", { style: { color: COLORS.muted, fontSize: 11, fontWeight: 600 } }, props.value + "%"),
-      ),
-      el(
-        "div",
-        {
-          style: {
-            height: 8,
-            overflow: "hidden",
-            borderRadius: 999,
-            background: "rgba(121, 136, 164, 0.16)",
-          },
-        },
-        el("div", {
-          style: {
-            width: props.value + "%",
-            height: "100%",
-            borderRadius: 999,
-            background: color,
-            boxShadow: "0 6px 14px -9px " + color,
-          },
-        }),
-      ),
-    );
   }
 
   function Pill(props) {
@@ -154,28 +108,28 @@
       "span",
       {
         style: {
-          display: "inline-flex",
           alignItems: "center",
-          gap: 6,
-          minHeight: 28,
-          padding: "5px 10px",
-          borderRadius: 999,
+          background: props.background || "rgba(255, 255, 255, 0.72)",
           border: "1px solid " + (props.border || COLORS.line),
-          background: props.background || "rgba(255, 255, 255, 0.7)",
+          borderRadius: 999,
           color: props.color || COLORS.ink,
-          fontSize: 12,
+          display: "inline-flex",
+          fontSize: 13,
           fontWeight: 700,
+          gap: 7,
+          minHeight: 30,
+          padding: "5px 11px",
           whiteSpace: "nowrap",
         },
       },
       props.dot
         ? el("span", {
             style: {
-              width: 7,
-              height: 7,
-              borderRadius: 999,
               background: props.dot,
+              borderRadius: 999,
               boxShadow: "0 0 0 3px " + props.dot + "22",
+              height: 8,
+              width: 8,
             },
           })
         : null,
@@ -188,9 +142,9 @@
       "section",
       {
         style: {
+          background: props.background || COLORS.surface,
           border: "1px solid " + COLORS.line,
           borderRadius: 22,
-          background: props.background || COLORS.surface,
           boxShadow: props.shadow || "0 16px 36px -34px rgba(23, 32, 51, 0.52)",
           padding: props.padding || 16,
         },
@@ -199,26 +153,53 @@
     );
   }
 
+  function Metric(props) {
+    return el(
+      Panel,
+      { padding: "14px 16px", shadow: "none" },
+      el("div", { style: { color: COLORS.muted, fontSize: 13, fontWeight: 700 } }, props.label),
+      el("div", { style: { color: props.color || COLORS.ink, fontSize: 28, fontWeight: 900, lineHeight: 1.05, marginTop: 5 } }, props.value),
+    );
+  }
+
+  function PlatformList(props) {
+    const state = counts(props.status);
+    if (!state.platforms.length) {
+      return el("p", { style: { color: COLORS.muted, fontSize: 14, lineHeight: 1.45, margin: 0 } }, "No gateway platforms are reporting status.");
+    }
+    return el(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: 10 } },
+      ...state.platforms.map(function (entry) {
+        const name = entry[0];
+        const platform = entry[1] || {};
+        const online = platform.state === "connected" || platform.state === "running" || platform.state === "ok";
+        return el(
+          "div",
+          {
+            key: name,
+            style: {
+              alignItems: "center",
+              borderTop: "1px solid rgba(121, 136, 164, 0.14)",
+              display: "flex",
+              gap: 10,
+              justifyContent: "space-between",
+              paddingTop: 10,
+            },
+          },
+          el("span", { style: { color: COLORS.ink, fontSize: 14, fontWeight: 700 } }, name),
+          el(Pill, { dot: online ? COLORS.green : COLORS.amber }, platform.state || "unknown"),
+        );
+      }),
+    );
+  }
+
   function SidebarSlot() {
     const active = useTaskThemeActive();
     const status = useDashboardStatus();
-    const counts = useMemo(function () {
-      return statCounts(status);
-    }, [status]);
-
     if (!active) return null;
 
-    const projects = [
-      { name: "Launch board", color: COLORS.blue, done: 76 },
-      { name: "Agent follow-ups", color: COLORS.green, done: counts.queueHealth },
-      { name: "Review queue", color: COLORS.amber, done: 48 },
-    ];
-    const tasks = [
-      { title: "Review active sessions", state: counts.activeSessions ? "Live" : "Ready", color: COLORS.green },
-      { title: "Check gateway signals", state: counts.gatewayOnline ? "Online" : "Quiet", color: counts.gatewayOnline ? COLORS.blue : COLORS.amber },
-      { title: "Prepare next sprint notes", state: "Draft", color: COLORS.amber },
-    ];
-
+    const state = counts(status);
     return el(
       "div",
       {
@@ -227,132 +208,37 @@
           color: COLORS.ink,
           display: "flex",
           flexDirection: "column",
-          gap: 14,
-          minHeight: "100%",
-          padding: "14px 10px 18px 0",
           fontFamily: "var(--theme-font-sans, ui-sans-serif, system-ui, sans-serif)",
+          gap: 16,
+          minHeight: "100%",
+          padding: 0,
         },
       },
       el(
         Panel,
-        { background: "linear-gradient(135deg, rgba(62,105,255,0.1), rgba(18,184,134,0.11)), rgba(255,255,255,0.86)" },
+        { background: "linear-gradient(135deg, rgba(62,105,255,0.08), rgba(18,184,134,0.08)), rgba(255,255,255,0.9)" },
         el(
           "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 } },
+          { style: { alignItems: "flex-start", display: "flex", gap: 12, justifyContent: "space-between" } },
           el(
             "div",
             null,
-            el("div", { style: { color: COLORS.muted, fontSize: 12, fontWeight: 700 } }, "Today"),
-            el("div", { style: { marginTop: 3, fontSize: 25, lineHeight: 1.05, fontWeight: 800 } }, "Focus Plan"),
+            el("div", { style: { color: COLORS.muted, fontSize: 13, fontWeight: 700 } }, "Gateway"),
+            el("div", { style: { color: COLORS.ink, fontSize: 30, fontWeight: 900, lineHeight: 1.05, marginTop: 4 } }, state.gatewayLabel),
           ),
-          el(Pill, { dot: counts.gatewayOnline ? COLORS.green : COLORS.amber, color: COLORS.ink }, counts.gatewayOnline ? "Online" : "Standby"),
+          el(Pill, { dot: state.gatewayOnline ? COLORS.green : COLORS.amber }, state.gatewayLabel),
         ),
-        el("p", { style: { margin: "12px 0 16px", color: COLORS.muted, fontSize: 13, lineHeight: 1.45 } }, "3 priorities planned - next review at 4 PM"),
-        el(ProgressLine, { label: "Daily focus", value: counts.todayFocus, color: COLORS.blue }),
+        el("p", { style: { color: COLORS.muted, fontSize: 14, lineHeight: 1.5, margin: "14px 0 0" } }, state.gatewayOnline ? "Live operational status from the Hermes dashboard API." : "Gateway is not currently reporting as running."),
+        el("p", { style: { color: COLORS.muted, fontSize: 12, lineHeight: 1.4, margin: "6px 0 0" } }, state.updatedAt),
       ),
+      el(Metric, { label: "Active sessions", value: String(state.activeSessions), color: COLORS.blue }),
+      el(Metric, { label: "Platforms", value: String(state.platformCount), color: COLORS.green }),
+      el(Metric, { label: "Version", value: state.version, color: COLORS.ink }),
       el(
         Panel,
         null,
-        el("div", { style: { marginBottom: 14, fontSize: 14, fontWeight: 800 } }, "Projects"),
-        el(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: 13 } },
-          ...projects.map(function (project) {
-            return el(ProgressLine, {
-              key: project.name,
-              label: project.name,
-              value: project.done,
-              color: project.color,
-            });
-          }),
-        ),
-      ),
-      el(
-        Panel,
-        null,
-        el("div", { style: { marginBottom: 12, fontSize: 14, fontWeight: 800 } }, "Next Tasks"),
-        el(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: 10 } },
-          ...tasks.map(function (task) {
-            return el(
-              "div",
-              {
-                key: task.title,
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 10,
-                  padding: "10px 0",
-                  borderTop: "1px solid rgba(121, 136, 164, 0.14)",
-                },
-              },
-              el(
-                "div",
-                { style: { display: "flex", alignItems: "center", gap: 9, minWidth: 0 } },
-                el("span", { style: { width: 9, height: 9, borderRadius: 999, background: task.color, flex: "0 0 auto" } }),
-                el("span", { style: { fontSize: 12, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, task.title),
-              ),
-              el("span", { style: { color: COLORS.muted, fontSize: 11, fontWeight: 700 } }, task.state),
-            );
-          }),
-        ),
-      ),
-      el(
-        "div",
-        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
-        el(
-          Panel,
-          { padding: 13, shadow: "none" },
-          el("div", { style: { color: COLORS.muted, fontSize: 11, fontWeight: 700 } }, "Sessions"),
-          el("div", { style: { marginTop: 4, fontSize: 24, fontWeight: 800 } }, String(counts.activeSessions)),
-        ),
-        el(
-          Panel,
-          { padding: 13, shadow: "none" },
-          el("div", { style: { color: COLORS.muted, fontSize: 11, fontWeight: 700 } }, "Channels"),
-          el("div", { style: { marginTop: 4, fontSize: 24, fontWeight: 800 } }, String(counts.connectedPlatforms)),
-        ),
-      ),
-    );
-  }
-
-  function HeaderMarkSlot() {
-    const active = useTaskThemeActive();
-    if (!active) return null;
-    const accent = cssVar("--color-primary", COLORS.blue);
-    return el(
-      "div",
-      {
-        style: {
-          alignItems: "center",
-          color: COLORS.ink,
-          display: "flex",
-          gap: 9,
-          paddingLeft: 14,
-          paddingRight: 4,
-          fontFamily: "var(--theme-font-sans, ui-sans-serif, system-ui, sans-serif)",
-        },
-      },
-      el(
-        "span",
-        {
-          style: {
-            alignItems: "center",
-            background: "linear-gradient(135deg, " + accent + ", " + COLORS.green + ")",
-            borderRadius: 12,
-            boxShadow: "0 12px 24px -18px " + accent,
-            color: "#fff",
-            display: "inline-flex",
-            fontSize: 13,
-            fontWeight: 900,
-            height: 32,
-            justifyContent: "center",
-            width: 32,
-          },
-        },
-        "H",
+        el("div", { style: { color: COLORS.ink, fontSize: 16, fontWeight: 900, marginBottom: 12 } }, "Platform status"),
+        el(PlatformList, { status: status }),
       ),
     );
   }
@@ -360,15 +246,16 @@
   function HeaderBannerSlot() {
     const active = useTaskThemeActive();
     const status = useDashboardStatus();
-    const counts = statCounts(status);
     if (!active) return null;
+
+    const state = counts(status);
     return el(
       "div",
       {
         style: {
           display: "flex",
           justifyContent: "center",
-          padding: "0 1rem",
+          padding: "0 1.5rem",
           pointerEvents: "none",
           position: "relative",
           zIndex: 3,
@@ -379,30 +266,30 @@
         {
           style: {
             alignItems: "center",
-            background: "rgba(255, 255, 255, 0.8)",
+            background: "rgba(255, 255, 255, 0.82)",
             border: "1px solid rgba(121, 136, 164, 0.2)",
             borderRadius: 18,
             boxShadow: "0 18px 48px -42px rgba(23, 32, 51, 0.55)",
             color: COLORS.ink,
             display: "flex",
             flexWrap: "wrap",
+            fontFamily: "var(--theme-font-sans, ui-sans-serif, system-ui, sans-serif)",
             gap: 8,
             justifyContent: "space-between",
-            marginTop: 56,
+            marginTop: 58,
             maxWidth: 1180,
-            padding: "8px 10px",
-            width: "100%",
-            fontFamily: "var(--theme-font-sans, ui-sans-serif, system-ui, sans-serif)",
+            padding: "10px 12px",
             pointerEvents: "auto",
+            width: "100%",
           },
         },
-        el("span", { style: { color: COLORS.muted, fontSize: 12, fontWeight: 700, padding: "0 8px" } }, "Workspace pulse"),
+        el("span", { style: { color: COLORS.muted, fontSize: 13, fontWeight: 700, padding: "0 8px" } }, "Dashboard status"),
         el(
           "div",
           { style: { display: "flex", flexWrap: "wrap", gap: 8 } },
-          el(Pill, { dot: COLORS.green }, counts.todayFocus + "% focus"),
-          el(Pill, { dot: COLORS.blue }, counts.activeSessions + " active sessions"),
-          el(Pill, { dot: counts.gatewayOnline ? COLORS.green : COLORS.amber }, counts.gatewayOnline ? "gateway online" : "gateway idle"),
+          el(Pill, { dot: state.gatewayOnline ? COLORS.green : COLORS.amber }, "Gateway " + state.gatewayLabel.toLowerCase()),
+          el(Pill, { dot: COLORS.blue }, state.activeSessions + " active sessions"),
+          el(Pill, { dot: COLORS.green }, state.platformCount + " platforms"),
         ),
       ),
     );
@@ -410,18 +297,20 @@
 
   function FooterStatusSlot() {
     const active = useTaskThemeActive();
+    const status = useDashboardStatus();
     if (!active) return null;
+
     return el(
       "span",
       {
         style: {
           color: COLORS.muted,
           fontFamily: "var(--theme-font-sans, ui-sans-serif, system-ui, sans-serif)",
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: 700,
         },
       },
-      "Workspace ready",
+      counts(status).gatewayOnline ? "Workspace ready" : "Workspace standby",
     );
   }
 
@@ -441,7 +330,6 @@
 
   PLUGINS.register(NAME, HiddenPage);
   PLUGINS.registerSlot(NAME, "sidebar", SidebarSlot);
-  PLUGINS.registerSlot(NAME, "header-left", HeaderMarkSlot);
   PLUGINS.registerSlot(NAME, "header-banner", HeaderBannerSlot);
   PLUGINS.registerSlot(NAME, "footer-right", FooterStatusSlot);
 })();

@@ -9,6 +9,6 @@
     "position": "end",
     "hidden": true
   },
-  "slots": ["sidebar", "header-left", "header-banner", "footer-right"],
+  "slots": ["sidebar", "header-banner", "footer-right"],
   "entry": "dist/index.js"
 }

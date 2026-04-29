@@ -3,7 +3,7 @@
  *
  * A slot-only plugin (manifest sets tab.hidden: true) that populates
  * three shell slots when the user has the ``strike-freedom`` theme
- * selected (or any theme that picks layoutVariant: cockpit):
+ * selected:
  *
  *   - sidebar       → MS-STATUS panel: ENERGY / SHIELD / POWER bars,
  *                     ZGMF-X20A identity line, pilot block, hero
@@ -32,6 +32,8 @@
   const { React } = SDK;
   const { useState, useEffect } = SDK.hooks;
   const { api } = SDK;
+  const THEME_NAME = "strike-freedom";
+  const THEME_STORAGE_KEY = "hermes-dashboard-theme";
 
   // ---------------------------------------------------------------------
   // Helpers
@@ -41,6 +43,42 @@
   function cssVar(name) {
     if (typeof document === "undefined") return "";
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function isStrikeThemeActive() {
+    if (typeof document === "undefined" || typeof window === "undefined") return false;
+    let activeTheme = "";
+    try {
+      activeTheme = window.localStorage.getItem(THEME_STORAGE_KEY) || "";
+    } catch {
+      activeTheme = "";
+    }
+    return activeTheme === THEME_NAME && document.documentElement.dataset.layoutVariant === "cockpit";
+  }
+
+  function useStrikeThemeActive() {
+    const [active, setActive] = useState(isStrikeThemeActive());
+    useEffect(function () {
+      if (typeof document === "undefined") return undefined;
+      function update() { setActive(isStrikeThemeActive()); }
+      update();
+      const observer = typeof MutationObserver !== "undefined"
+        ? new MutationObserver(update)
+        : null;
+      if (observer) {
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-layout-variant", "style"] });
+      }
+      if (typeof window !== "undefined") {
+        window.addEventListener("storage", update);
+      }
+      return function () {
+        if (observer) observer.disconnect();
+        if (typeof window !== "undefined") {
+          window.removeEventListener("storage", update);
+        }
+      };
+    }, []);
+    return active;
   }
 
   /** Segmented chip progress bar — 10 cells filled proportionally to value. */
@@ -92,6 +130,7 @@
   // ---------------------------------------------------------------------
 
   function SidebarSlot() {
+    const active = useStrikeThemeActive();
     // Pull live-ish numbers from the status API so the plugin isn't just
     // a static decoration. Fall back to full bars if the API is slow /
     // unavailable.
@@ -103,6 +142,8 @@
         .catch(function () {});
       return function () { cancel = true; };
     }, []);
+
+    if (!active) return null;
 
     // Map real status signals to HUD telemetry. Energy/shield/power
     // aren't literal concepts on a software agent, so we read them from
@@ -219,6 +260,8 @@
   // ---------------------------------------------------------------------
 
   function HeaderCrestSlot() {
+    const active = useStrikeThemeActive();
+    if (!active) return null;
     const crest = cssVar("--theme-asset-crest");
     const inner = crest
       ? React.createElement("div", {
@@ -267,6 +310,8 @@
   // ---------------------------------------------------------------------
 
   function FooterTaglineSlot() {
+    const active = useStrikeThemeActive();
+    if (!active) return null;
     return React.createElement(
       "span",
       {
