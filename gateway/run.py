@@ -9610,7 +9610,14 @@ class GatewayRunner:
             _progress_thread_id = source.thread_id or event_message_id
         else:
             _progress_thread_id = source.thread_id
-        _progress_metadata = {"thread_id": _progress_thread_id} if _progress_thread_id else None
+        _progress_metadata = {"thread_id": _progress_thread_id} if _progress_thread_id else {}
+        if source.platform == Platform.WEBCHAT:
+            _progress_metadata.update({
+                "display_type": "tool_progress",
+                "message_role": "system",
+            })
+        if not _progress_metadata:
+            _progress_metadata = None
 
         async def send_progress_messages():
             if not progress_queue:

@@ -585,16 +585,19 @@ class WebChatAdapter(BasePlatformAdapter):
             # without having to crack open ``metadata`` on the read path.
             timings = metadata.get("timings") if isinstance(metadata, dict) else None
             message_role = metadata.get("message_role") if isinstance(metadata, dict) else None
+            display_type = metadata.get("display_type") if isinstance(metadata, dict) else None
             if timings:
                 payload["timings"] = timings
             if message_role in {"assistant", "system"}:
                 payload["role"] = message_role
-            if timings or message_role in {"assistant", "system"}:
+            if display_type == "tool_progress":
+                payload["displayType"] = display_type
+            if timings or message_role in {"assistant", "system"} or display_type == "tool_progress":
                 # Don't double-send lifted transport fields inside metadata.
                 metadata = {
                     k: v
                     for k, v in metadata.items()
-                    if k not in {"timings", "message_role"}
+                    if k not in {"timings", "message_role", "display_type"}
                 }
             if metadata:
                 payload["metadata"] = metadata

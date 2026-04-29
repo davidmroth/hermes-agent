@@ -582,6 +582,30 @@ async def test_send_lifts_system_role_to_top_level_payload():
 
 
 @pytest.mark.asyncio
+async def test_send_lifts_tool_progress_display_type_to_top_level_payload():
+    """Webchat adapter should hoist tool-progress display metadata."""
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "msg-45"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = await adapter.send(
+        chat_id="conv-1",
+        content="browser_navigate...",
+        metadata={"thread_id": "t-1", "display_type": "tool_progress"},
+    )
+
+    assert result.success is True
+    assert posted["json"]["displayType"] == "tool_progress"
+    assert posted["json"]["metadata"] == {"thread_id": "t-1"}
+
+
+@pytest.mark.asyncio
 async def test_send_uses_message_id_to_update_existing_assistant_message():
     adapter = _build_adapter()
     posted = {}
