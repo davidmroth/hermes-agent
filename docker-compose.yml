@@ -136,7 +136,7 @@ services:
       - path: .env
         required: false
     volumes:
-      - ./:/workspace
+      - .data/hermes/workspace:/workspace
       - .data/opencode:/root
     ports:
       - "4096:4096"
