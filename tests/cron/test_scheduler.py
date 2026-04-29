@@ -88,6 +88,7 @@ class TestResolveDeliveryTarget:
             "TELEGRAM_HOME_CHANNEL",
             "DISCORD_HOME_CHANNEL",
             "SLACK_HOME_CHANNEL",
+            "WEBCHAT_HOME_CHANNEL",
             "SIGNAL_HOME_CHANNEL",
             "MATTERMOST_HOME_CHANNEL",
             "SMS_HOME_CHANNEL",
@@ -115,6 +116,15 @@ class TestResolveDeliveryTarget:
         assert _resolve_delivery_target({"deliver": "matrix"}) == {
             "platform": "matrix",
             "chat_id": "!room123:example.org",
+            "thread_id": None,
+        }
+
+    def test_bare_webui_delivery_uses_webchat_home_channel(self, monkeypatch):
+        monkeypatch.setenv("WEBCHAT_HOME_CHANNEL", "conversation-123")
+
+        assert _resolve_delivery_target({"deliver": "webui"}) == {
+            "platform": "webui",
+            "chat_id": "conversation-123",
             "thread_id": None,
         }
 
@@ -314,6 +324,35 @@ class TestDeliverResultWrapping:
 
         sent_content = send_mock.call_args.kwargs.get("content") or send_mock.call_args[0][-1]
         assert "Cronjob Response: abc-123" in sent_content
+
+    def test_webui_delivery_maps_to_webchat_and_wraps_content(self, monkeypatch):
+        """deliver=webui should route through the WebChat adapter platform."""
+        from gateway.config import Platform
+
+        monkeypatch.setenv("WEBCHAT_HOME_CHANNEL", "conversation-123")
+
+        pconfig = MagicMock()
+        pconfig.enabled = True
+        mock_cfg = MagicMock()
+        mock_cfg.platforms = {Platform.WEBCHAT: pconfig}
+
+        with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
+             patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock:
+            job = {
+                "id": "webui-job",
+                "name": "web inbox report",
+                "deliver": "webui",
+            }
+            _deliver_result(job, "Visible in the web inbox.")
+
+        send_mock.assert_called_once()
+        args = send_mock.call_args[0]
+        assert args[0] == Platform.WEBCHAT
+        assert args[2] == "conversation-123"
+        sent_content = send_mock.call_args.kwargs.get("content") or args[3]
+        assert "Cronjob Response: web inbox report" in sent_content
+        assert "(job_id: webui-job)" in sent_content
+        assert "Visible in the web inbox." in sent_content
 
     def test_delivery_skips_wrapping_when_config_disabled(self):
         """When cron.wrap_response is false, deliver raw content without header/footer."""

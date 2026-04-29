@@ -1,0 +1,14 @@
+{
+  "name": "task-management-dashboard",
+  "label": "Task Management Dashboard",
+  "description": "Readable task-board sidebar, header summary, and footer chrome for the Task Management dashboard theme",
+  "icon": "BarChart3",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/task-management-dashboard",
+    "position": "end",
+    "hidden": true
+  },
+  "slots": ["sidebar", "header-left", "header-banner", "footer-right"],
+  "entry": "dist/index.js"
+}

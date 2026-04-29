@@ -199,6 +199,9 @@ export default function CronPage() {
                   <SelectOption value="slack">
                     {t.cron.delivery.slack}
                   </SelectOption>
+                  <SelectOption value="webui">
+                    {t.cron.delivery.webui}
+                  </SelectOption>
                   <SelectOption value="email">
                     {t.cron.delivery.email}
                   </SelectOption>

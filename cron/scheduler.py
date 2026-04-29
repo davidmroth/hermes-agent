@@ -46,7 +46,7 @@ _KNOWN_DELIVERY_PLATFORMS = frozenset({
     "telegram", "discord", "slack", "whatsapp", "signal",
     "matrix", "mattermost", "homeassistant", "dingtalk", "feishu",
     "wecom", "wecom_callback", "weixin", "sms", "email", "webhook", "bluebubbles",
-    "qqbot",
+    "qqbot", "webui",
 })
 
 # Platforms that support a configured cron/notification home target, mapped to
@@ -56,6 +56,7 @@ _HOME_TARGET_ENV_VARS = {
     "telegram": "TELEGRAM_HOME_CHANNEL",
     "discord": "DISCORD_HOME_CHANNEL",
     "slack": "SLACK_HOME_CHANNEL",
+    "webui": "WEBCHAT_HOME_CHANNEL",
     "signal": "SIGNAL_HOME_CHANNEL",
     "mattermost": "MATTERMOST_HOME_CHANNEL",
     "sms": "SMS_HOME_CHANNEL",
@@ -292,6 +293,7 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
         "telegram": Platform.TELEGRAM,
         "discord": Platform.DISCORD,
         "slack": Platform.SLACK,
+        "webui": Platform.WEBCHAT,
         "whatsapp": Platform.WHATSAPP,
         "signal": Platform.SIGNAL,
         "webchat": Platform.WEBCHAT,
