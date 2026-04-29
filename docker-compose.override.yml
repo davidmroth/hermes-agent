@@ -14,6 +14,8 @@ services:
       - PYTHONPATH=/workspace:/opt/hermes:/opt/agentlens-sdk
     volumes:
       - .data/hermes:/opt/data
+      # Workspace for terminal commands
+      - .data/hermes/workspace:/workspace
       # AgentLens SDK — makes `from sdk import AgentLensClient` work
       - ../agentlens:/opt/agentlens-sdk
       #- /usr/bin/docker:/usr/bin/docker
@@ -25,6 +27,7 @@ services:
     depends_on:
       camofox:
         condition: service_healthy
+
 
   # ---------------------------------------------------------------------------
   # Camofox — Local anti-detection browser (Firefox/Camoufox)
