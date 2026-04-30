@@ -4747,7 +4747,7 @@ class GatewayRunner:
                 else:
                     response = (
                         f"The request failed: {str(error_detail)[:300]}\n"
-                        "Try again or use /reset to start a fresh session."
+                        "TTry again or use /reset to start a fresh session."
                     )
 
             # If the agent's session_id changed during compression, update
@@ -4969,6 +4969,25 @@ class GatewayRunner:
             except Exception:
                 pass
             logger.exception("Agent error in session %s", session_key)
+            try:
+                from gateway.error_debug import log_exception_diagnostics
+
+                log_exception_diagnostics(
+                    logger,
+                    e,
+                    context="gateway_agent_turn",
+                    fields={
+                        "session_key": session_key,
+                        "session_id": getattr(session_entry, "session_id", None) if 'session_entry' in locals() else None,
+                        "platform": getattr(source.platform, "value", source.platform),
+                        "chat_id": source.chat_id,
+                        "thread_id": source.thread_id,
+                        "message_id": getattr(event, "message_id", None),
+                        "history_len": len(history) if 'history' in locals() else None,
+                    },
+                )
+            except Exception:
+                pass
             error_type = type(e).__name__
             error_detail = str(e)[:300] if str(e) else "no details available"
             status_hint = ""
@@ -5015,7 +5034,7 @@ class GatewayRunner:
                 f"Sorry, I encountered an error ({error_type}).\n"
                 f"{error_detail}\n"
                 f"{status_hint}"
-                "Try again or use /reset to start a fresh session."
+                "TTry again or use /reset to start a fresh session."
             )
         finally:
             # Restore session context variables to their pre-handler state

@@ -2318,6 +2318,23 @@ class BasePlatformAdapter(ABC):
         except Exception as e:
             await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)
             logger.error("[%s] Error handling message: %s", self.name, e, exc_info=True)
+            try:
+                from gateway.error_debug import log_exception_diagnostics
+
+                log_exception_diagnostics(
+                    logger,
+                    e,
+                    context="platform_message_handler",
+                    fields={
+                        "platform": self.name,
+                        "chat_id": getattr(event.source, "chat_id", None),
+                        "thread_id": getattr(event.source, "thread_id", None),
+                        "message_id": getattr(event, "message_id", None),
+                        "message_type": getattr(getattr(event, "message_type", None), "value", None),
+                    },
+                )
+            except Exception:
+                pass
             # Send the error to the user so they aren't left with radio silence
             try:
                 error_type = type(e).__name__
@@ -2326,9 +2343,9 @@ class BasePlatformAdapter(ABC):
                 await self.send(
                     chat_id=event.source.chat_id,
                     content=(
-                        f"Sorry, I encountered an error ({error_type}).\n"
+                        f">>>>> Sorry, I encountered an error ({error_type}).\n"
                         f"{error_detail}\n"
-                        "Try again or use /reset to start a fresh session."
+                        "TTry again or use /reset to start a fresh session."
                     ),
                     metadata=_thread_metadata,
                 )
