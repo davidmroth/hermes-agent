@@ -787,6 +787,41 @@ async def test_run_agent_defers_background_review_notification_until_release(mon
 
 
 @pytest.mark.asyncio
+async def test_webchat_background_review_notification_is_system_metadata(monkeypatch, tmp_path):
+    adapter, result = await _run_with_agent(
+        monkeypatch,
+        tmp_path,
+        BackgroundReviewAgent,
+        session_id="sess-webchat-bg-review",
+        platform=Platform.WEBCHAT,
+        chat_id="conv-1",
+        chat_type="direct",
+        thread_id=None,
+        config_data={"display": {"interim_assistant_messages": True}},
+    )
+
+    assert result["final_response"] == "done"
+    assert adapter.sent == []
+
+    callback = adapter.pop_post_delivery_callback("agent:main:webchat:direct:conv-1")
+    assert callback is not None
+    callback()
+    for _ in range(10):
+        if adapter.sent:
+            break
+        await asyncio.sleep(0.01)
+
+    assert adapter.sent == [
+        {
+            "chat_id": "conv-1",
+            "content": "💾 Skill 'prospect-scanner' created.",
+            "reply_to": None,
+            "metadata": {"message_role": "system"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_base_processing_releases_post_delivery_callback_after_main_send():
     """Post-delivery callbacks on the adapter fire after the main response."""
     adapter = ProgressCaptureAdapter()

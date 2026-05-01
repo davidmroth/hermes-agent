@@ -9814,6 +9814,12 @@ class GatewayRunner:
         _status_thread_metadata = {"thread_id": _progress_thread_id} if _progress_thread_id else None
         _status_error_buffer: list[str] = []
 
+        def _webchat_system_metadata(base_metadata: dict | None = None) -> dict | None:
+            metadata = dict(base_metadata or {})
+            if source.platform == Platform.WEBCHAT:
+                metadata["message_role"] = "system"
+            return metadata or None
+
         def _is_bufferable_status_message(text: str) -> bool:
             """Return True for retry/failure lifecycle lines worth collapsing.
 
@@ -9858,7 +9864,7 @@ class GatewayRunner:
                     _status_adapter.send(
                         _status_chat_id,
                         message,
-                        metadata=_status_thread_metadata,
+                        metadata=_webchat_system_metadata(_status_thread_metadata),
                     ),
                     _loop_for_step,
                 )
@@ -10107,7 +10113,7 @@ class GatewayRunner:
                         _status_adapter.send(
                             _status_chat_id,
                             message,
-                            metadata=_status_thread_metadata,
+                            metadata=_webchat_system_metadata(_status_thread_metadata),
                         ),
                         _loop_for_step,
                     )
