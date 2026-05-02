@@ -50,7 +50,8 @@ RUN usermod -aG docker hermes
 
 USER hermes
 RUN uv venv && \
-    uv pip install --no-cache-dir -e ".[all]"
+    uv pip install --no-cache-dir -e ".[all]" && \
+    uv pip install --no-cache-dir 'hindsight-client>=0.4.22'
 
 # Runtime starts as root so the entrypoint can fix mounted-volume ownership
 # and then drop back to the hermes user via gosu.

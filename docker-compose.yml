@@ -32,15 +32,11 @@ services:
     command: gateway
     environment:
       PYTHONUNBUFFERED: "1"
-      # Terminal backend: "local" runs commands inside this container.
-      # Change to "docker" + uncomment the docker socket volume below
-      # for isolated sandbox execution via the terminal-sandbox service.
-      TERMINAL_ENV: local
-      TERMINAL_CWD: /workspace
       # Enable the gateway health/API endpoint for the dashboard container.
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: 0.0.0.0
       API_SERVER_PORT: "8642"
+      API_SERVER_KEY: ${API_SERVER_KEY}
       # Route Hermes through the OpenCode sidecar using the existing ACP
       # subprocess adapter. Override these in .env if you want a different
       # provider or ACP command.
@@ -56,9 +52,6 @@ services:
     #depends_on:
     #  - opencode
     volumes:
-      # Docker socket — required for the OpenCode ACP bridge and optional
-      # terminal-sandbox support.
-      #- /var/run/docker.sock:/var/run/docker.sock
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py
@@ -99,8 +92,6 @@ services:
       PYTHONUNBUFFERED: "1"
       GATEWAY_HEALTH_URL: http://hermes:8642
       GATEWAY_HEALTH_TIMEOUT: "3"
-      TERMINAL_ENV: local
-      TERMINAL_CWD: /workspace
     env_file:
       - path: .env
         required: false
@@ -120,56 +111,5 @@ services:
         max-file: "3"
         max-size: "10m"
 
-  # ---------------------------------------------------------------------------
-  # OpenCode — ACP sidecar backend for Hermes
-  # Hermes reaches this container via `docker exec ... opencode acp --cwd
-  # /workspace`, while the long-lived `serve` process keeps the sidecar running
-  # and exposes OpenCode's HTTP API for manual attach/debugging.
-  # ---------------------------------------------------------------------------
-  opencode:
-    image: ghcr.io/anomalyco/opencode
-    container_name: hermes-opencode
-    restart: unless-stopped
-    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
-    working_dir: /workspace
-    env_file:
-      - path: .env
-        required: false
-    volumes:
-      - .data/hermes/workspace:/workspace
-      - .data/opencode:/root
-    ports:
-      - "4096:4096"
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "3"
-        max-size: "10m"
-
-  # ---------------------------------------------------------------------------
-  # Terminal Sandbox — Isolated command execution environment
-  # The gateway's terminal tool can `docker exec` into this container
-  # instead of running commands in its own process.
-  # Enable by setting TERMINAL_ENV=docker in the gateway service.
-  # ---------------------------------------------------------------------------
-  terminal-sandbox:
-    image: nikolaik/python-nodejs:python3.11-nodejs20
-    profiles:
-      - sandbox
-    restart: unless-stopped
-    command: ["sleep", "infinity"]
-    working_dir: /workspace
-    volumes:
-      - sandbox_workspace:/workspace
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 2048M
-    security_opt:
-      - no-new-privileges:true
-
 volumes:
   hermes_data:
-  sandbox_workspace:

@@ -9,15 +9,12 @@ services:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
       - CAMOFOX_URL=http://camofox:9377
-      # AgentLens observability
-      - AGENTLENS_SERVER_URL=http://agentlens:8500
-      - PYTHONPATH=/workspace:/opt/hermes:/opt/agentlens-sdk
+      - PYTHONPATH=/workspace:/opt/hermes
+      # Hindsight memory — local_external mode pointing at the hindsight service
+      - HINDSIGHT_MODE=local_external
+      - HINDSIGHT_API_URL=http://hindsight:8888
     volumes:
       - .data/hermes:/opt/data
-      # Workspace for terminal commands
-      - .data/hermes/workspace:/workspace
-      # AgentLens SDK — makes `from sdk import AgentLensClient` work
-      - ../agentlens:/opt/agentlens-sdk
       #- /usr/bin/docker:/usr/bin/docker
       #- /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
@@ -27,7 +24,6 @@ services:
     depends_on:
       camofox:
         condition: service_healthy
-
 
   # ---------------------------------------------------------------------------
   # Camofox — Local anti-detection browser (Firefox/Camoufox)
@@ -41,7 +37,7 @@ services:
   # ---------------------------------------------------------------------------
   camofox:
     build:
-      context: .data/camofox-browser
+      context: .services/camofox-browser
       dockerfile: Dockerfile
       args:
         ARCH: x86_64
@@ -61,7 +57,13 @@ services:
     volumes:
       - .data/camofox:/data
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9377/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:9377/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -72,20 +74,62 @@ services:
         max-file: "3"
         max-size: "10m"
 
-#networks:
-#  agentlens_default:
-#    external: true
-
-  hermes-hud:
-    build:
-      context: ../hermes-hud
-      dockerfile: Dockerfile
-    profiles:
-      - hud
+  # ---------------------------------------------------------------------------
+  # Hindsight — Self-hosted long-term memory with knowledge graph
+  # API on port 8888 (internal), Control Plane UI on port 9999 (exposed).
+  # Uses the same LLM endpoint as Hermes (ai.local) for memory extraction.
+  # Data persists in .data/hindsight (embedded PostgreSQL).
+  #
+  # Access the web UI: http://localhost:9999
+  # ---------------------------------------------------------------------------
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest
+    restart: unless-stopped
     environment:
-      - HERMES_HOME=/opt/data
+      # LLM configuration — point at the same model Hermes uses
+      - HINDSIGHT_API_LLM_PROVIDER=openai
+      - HINDSIGHT_API_LLM_BASE_URL=http://ai.local:8000/v1
+      - HINDSIGHT_API_LLM_MODEL=Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf
+      - HINDSIGHT_API_LLM_API_KEY=llama.cpp
+    extra_hosts:
+      - "ai.local:192.168.87.153"
     volumes:
-      - .data/hermes:/opt/data
-      - ../hermes-hud:/opt/hermes-hud
-    stdin_open: true
-    tty: true
+      - .data/hindsight:/home/hindsight/.pg0
+    ports:
+      - "9999:9999" # Control Plane web UI
+    expose:
+      - "8888" # API — accessible to hermes via internal network
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # ---------------------------------------------------------------------------
+  # OpenCode — ACP sidecar backend for Hermes
+  # Hermes reaches this container via `docker exec ... opencode acp --cwd
+  # /workspace`, while the long-lived `serve` process keeps the sidecar running
+  # and exposes OpenCode's HTTP API for manual attach/debugging.
+  # ---------------------------------------------------------------------------
+  opencode:
+    image: ghcr.io/anomalyco/opencode
+    container_name: hermes-opencode
+    restart: unless-stopped
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    working_dir: /workspace
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - .data/hermes/workspace:/workspace
+      - .data/opencode:/root
+    ports:
+      - "4096:4096"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+volumes:
+  sandbox_workspace:
