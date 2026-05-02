@@ -157,5 +157,25 @@ services:
         max-file: "3"
         max-size: "10m"
 
+
+  briefing-renderer:
+    build:
+      context: .
+      dockerfile: service/briefing-renderer/Dockerfile
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      BRIEFING_RENDERER_DATA_DIR: /data
+      BRIEFING_RENDERER_SERVICE_TOKEN: ${BRIEFING_RENDERER_SERVICE_TOKEN:-}
+    volumes:
+      - ./service/briefing-renderer:/app
+      - briefing_renderer_data:/data
+    ports:
+      - "${BRIEFING_RENDERER_PORT:-9910}:8080"
+
 volumes:
   sandbox_workspace:
+  briefing_renderer_data:
