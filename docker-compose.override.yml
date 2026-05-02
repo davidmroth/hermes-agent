@@ -131,5 +131,30 @@ services:
         max-file: "3"
         max-size: "10m"
 
+  # ---------------------------------------------------------------------------
+  # NeuTTS Air — Minimal local TTS sidecar
+  # Host endpoint: http://127.0.0.1:8000/tts
+  # Internal endpoint: http://neutts-air:8000/tts
+  # Model/cache files persist in .services/NeuTTSTTS/cache.
+  # ---------------------------------------------------------------------------
+  neutts-air:
+    build:
+      context: .services/NeuTTSTTS
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - NEUTTS_BACKBONE_REPO=neuphonic/neutts-air
+      - NEUTTS_BACKBONE_DEVICE=cpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - .services/NeuTTSTTS/cache:/root/.cache
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
 volumes:
   sandbox_workspace:
