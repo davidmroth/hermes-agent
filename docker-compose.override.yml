@@ -139,15 +139,16 @@ services:
   # ---------------------------------------------------------------------------
   neutts-air:
     build:
-      context: .services/NeuTTSTTS
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: .services/NeuTTSTTS/Dockerfile
     restart: unless-stopped
     environment:
       - HF_HOME=/root/.cache/huggingface
       - NEUTTS_BACKBONE_REPO=neuphonic/neutts-air
       - NEUTTS_BACKBONE_DEVICE=cpu
+      - NEUTTS_CODEC_DEVICE=cpu
     ports:
-      - "8000:8000"
+      - "9099:8000"
     volumes:
       - .services/NeuTTSTTS/cache:/root/.cache
     logging:
