@@ -2,13 +2,14 @@
 """
 Text-to-Speech Tool Module
 
-Supports seven TTS providers:
+Supports eight TTS providers:
 - Edge TTS (default, free, no API key): Microsoft Edge neural voices
 - ElevenLabs (premium): High-quality voices, needs ELEVENLABS_API_KEY
 - OpenAI TTS: Good quality, needs OPENAI_API_KEY
 - MiniMax TTS: High-quality with voice cloning, needs MINIMAX_API_KEY
 - Mistral (Voxtral TTS): Multilingual, native Opus, needs MISTRAL_API_KEY
 - Google Gemini TTS: Controllable, 30 prebuilt voices, needs GEMINI_API_KEY
+- NeuTTS Air (local sidecar, free, no API key): HTTP sidecar via Docker or local FastAPI
 - NeuTTS (local, free, no API key): On-device TTS via neutts_cli, needs neutts installed
 
 Output formats:
@@ -41,7 +42,7 @@ from pathlib import Path
 from typing import Callable, Dict, Any, Optional
 from urllib.parse import urljoin
 
-from hermes_constants import display_hermes_home
+from hermes_constants import display_hermes_home, is_container
 
 logger = logging.getLogger(__name__)
 from tools.managed_tool_gateway import resolve_managed_tool_gateway
@@ -111,6 +112,8 @@ DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 DEFAULT_GEMINI_TTS_VOICE = "Kore"
 DEFAULT_GEMINI_TTS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+DEFAULT_NEUTTS_AIR_CONTAINER_BASE_URL = "http://neutts-air:8000"
+DEFAULT_NEUTTS_AIR_HOST_BASE_URL = "http://127.0.0.1:9099"
 # PCM output specs for Gemini TTS (fixed by the API)
 GEMINI_TTS_SAMPLE_RATE = 24000
 GEMINI_TTS_CHANNELS = 1
@@ -137,6 +140,7 @@ PROVIDER_MAX_TEXT_LENGTH: Dict[str, int] = {
     "mistral": 4000,      # conservative; no published per-request cap
     "gemini": 5000,       # Gemini TTS caps at ~8k input tokens / ~655s audio
     "elevenlabs": 10000,  # fallback when model-aware lookup can't resolve (multilingual_v2)
+    "neutts-air": 2000,   # local sidecar, same model family as NeuTTS Air
     "neutts": 2000,       # local model, quality falls off on long text
     "kittentts": 2000,    # local 25MB model
 }
@@ -222,6 +226,103 @@ def _load_tts_config() -> Dict[str, Any]:
 def _get_provider(tts_config: Dict[str, Any]) -> str:
     """Get the configured TTS provider name."""
     return (tts_config.get("provider") or DEFAULT_PROVIDER).lower().strip()
+
+
+def _default_neutts_air_base_url() -> str:
+    """Return the default NeuTTS Air sidecar base URL for this runtime."""
+    return DEFAULT_NEUTTS_AIR_CONTAINER_BASE_URL if is_container() else DEFAULT_NEUTTS_AIR_HOST_BASE_URL
+
+
+def _resolve_neutts_air_base_url(tts_config: Dict[str, Any]) -> str:
+    """Resolve the configured NeuTTS Air base URL.
+
+    Accepts either a base URL (``http://host:port``) or a full ``/tts``
+    endpoint and normalizes it to the base.
+    """
+    provider_config = tts_config.get("neutts-air", {})
+    raw_url = str(
+        provider_config.get("base_url")
+        or os.getenv("NEUTTS_AIR_BASE_URL")
+        or _default_neutts_air_base_url()
+    ).strip()
+    if not raw_url:
+        raise ValueError("NeuTTS Air base_url is empty")
+    base_url = raw_url.rstrip("/")
+    if base_url.endswith("/tts"):
+        base_url = base_url[:-4]
+    return base_url
+
+
+def _read_neutts_air_ref_text(ref_text_value: str) -> str:
+    """Return the sidecar voice-clone transcript.
+
+    ``ref_text`` may be a literal transcript or a filesystem path.
+    Existing local NeuTTS config used a path, so both are supported.
+    """
+    candidate = Path(ref_text_value).expanduser()
+    if candidate.exists() and candidate.is_file():
+        return candidate.read_text(encoding="utf-8").strip()
+    return ref_text_value.strip()
+
+
+def _resolve_neutts_air_reference(tts_config: Dict[str, Any]) -> tuple[Optional[Path], Optional[str]]:
+    """Resolve optional voice-cloning reference inputs for NeuTTS Air."""
+    provider_config = tts_config.get("neutts-air", {})
+    ref_audio_value = str(provider_config.get("ref_audio", "") or "").strip()
+    ref_text_value = str(provider_config.get("ref_text", "") or "").strip()
+
+    if bool(ref_audio_value) != bool(ref_text_value):
+        raise ValueError(
+            "NeuTTS Air voice cloning requires both tts.neutts-air.ref_audio and tts.neutts-air.ref_text"
+        )
+
+    if not ref_audio_value:
+        return None, None
+
+    ref_audio_path = Path(ref_audio_value).expanduser()
+    if not ref_audio_path.exists() or not ref_audio_path.is_file():
+        raise FileNotFoundError(f"NeuTTS Air reference audio not found: {ref_audio_path}")
+
+    ref_text = _read_neutts_air_ref_text(ref_text_value)
+    if not ref_text:
+        raise ValueError("NeuTTS Air reference text is empty")
+
+    return ref_audio_path, ref_text
+
+
+def _convert_wav_to_requested_format(wav_path: str, output_path: str) -> str:
+    """Convert a WAV file to the caller's requested format when needed."""
+    if wav_path == output_path:
+        return output_path
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        conv_cmd = [ffmpeg, "-i", wav_path, "-y", "-loglevel", "error"]
+        if output_path.endswith(".ogg"):
+            conv_cmd.extend(["-acodec", "libopus", "-ac", "1", "-b:a", "64k", "-vbr", "off"])
+        conv_cmd.append(output_path)
+        subprocess.run(conv_cmd, check=True, timeout=30)
+        os.remove(wav_path)
+    else:
+        os.rename(wav_path, output_path)
+    return output_path
+
+
+def _check_neutts_air_available(tts_config: Optional[Dict[str, Any]] = None) -> bool:
+    """Return True when the NeuTTS Air sidecar responds to ``/health``."""
+    import requests
+
+    cfg = tts_config or _load_tts_config()
+    try:
+        base_url = _resolve_neutts_air_base_url(cfg)
+    except Exception:
+        return False
+
+    try:
+        response = requests.get(f"{base_url}/health", timeout=2)
+        return response.status_code == 200
+    except Exception:
+        return False
 
 
 # ===========================================================================
@@ -764,6 +865,67 @@ def _generate_gemini_tts(text: str, output_path: str, tts_config: Dict[str, Any]
 
 
 # ===========================================================================
+# Provider: NeuTTS Air sidecar
+# ===========================================================================
+def _generate_neutts_air(text: str, output_path: str, tts_config: Dict[str, Any]) -> str:
+    """Generate speech using the NeuTTS Air HTTP sidecar.
+
+    The sidecar returns WAV audio. Hermes writes that WAV to disk first,
+    then converts to MP3 or OGG when the caller requested another format.
+    """
+    import requests
+
+    provider_config = tts_config.get("neutts-air", {})
+    base_url = _resolve_neutts_air_base_url(tts_config)
+    timeout_seconds = float(provider_config.get("timeout_seconds", 120))
+    ref_audio_path, ref_text = _resolve_neutts_air_reference(tts_config)
+
+    wav_path = output_path
+    if not output_path.endswith(".wav"):
+        wav_path = output_path.rsplit(".", 1)[0] + ".wav"
+
+    data: Dict[str, Any] = {"text": text}
+    files = None
+    if ref_audio_path is not None and ref_text is not None:
+        data["ref_text"] = ref_text
+        audio_handle = ref_audio_path.open("rb")
+        files = {"ref_audio": (ref_audio_path.name, audio_handle, "audio/wav")}
+    else:
+        audio_handle = None
+
+    try:
+        response = requests.post(
+            f"{base_url}/tts",
+            data=data,
+            files=files,
+            timeout=timeout_seconds,
+        )
+    finally:
+        if audio_handle is not None:
+            audio_handle.close()
+
+    if response.status_code != 200:
+        detail = response.text[:300]
+        try:
+            parsed = response.json()
+            if isinstance(parsed, dict):
+                detail = str(parsed.get("detail") or parsed.get("error") or detail)
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"NeuTTS Air sidecar error (HTTP {response.status_code}): {detail}"
+        )
+
+    with open(wav_path, "wb") as f:
+        f.write(response.content)
+
+    if not os.path.exists(wav_path) or os.path.getsize(wav_path) == 0:
+        raise RuntimeError("NeuTTS Air sidecar returned empty audio")
+
+    return _convert_wav_to_requested_format(wav_path, output_path)
+
+
+# ===========================================================================
 # NeuTTS (local, on-device TTS via neutts_cli)
 # ===========================================================================
 
@@ -1025,6 +1187,10 @@ def text_to_speech_tool(
             logger.info("Generating speech with Google Gemini TTS...")
             _generate_gemini_tts(text, file_str, tts_config)
 
+        elif provider == "neutts-air":
+            logger.info("Generating speech with NeuTTS Air sidecar...")
+            _generate_neutts_air(text, file_str, tts_config)
+
         elif provider == "neutts":
             if not _check_neutts_available():
                 return json.dumps({
@@ -1087,7 +1253,7 @@ def text_to_speech_tool(
         # Try Opus conversion for Telegram compatibility
         # Edge TTS outputs MP3, NeuTTS/KittenTTS output WAV — all need ffmpeg conversion
         voice_compatible = False
-        if provider in ("edge", "neutts", "minimax", "xai", "kittentts") and not file_str.endswith(".ogg"):
+        if provider in ("edge", "neutts-air", "neutts", "minimax", "xai", "kittentts") and not file_str.endswith(".ogg"):
             opus_path = _convert_to_opus(file_str)
             if opus_path:
                 file_str = opus_path
@@ -1141,6 +1307,9 @@ def check_tts_requirements() -> bool:
     Returns:
         bool: True if at least one provider can work.
     """
+    tts_config = _load_tts_config()
+    if _get_provider(tts_config) == "neutts-air":
+        return _check_neutts_air_available(tts_config)
     try:
         _import_edge_tts()
         return True

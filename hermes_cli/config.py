@@ -637,7 +637,7 @@ DEFAULT_CONFIG = {
     # limit (OpenAI 4096, xAI 15000, MiniMax 10000, ElevenLabs 5k-40k model-aware,
     # Gemini 5000, Edge 5000, Mistral 4000, NeuTTS/KittenTTS 2000).
     "tts": {
-        "provider": "edge",  # "edge" (free) | "elevenlabs" (premium) | "openai" | "xai" | "minimax" | "mistral" | "neutts" (local)
+        "provider": "edge",  # "edge" (free) | "elevenlabs" (premium) | "openai" | "xai" | "minimax" | "mistral" | "gemini" | "neutts-air" (sidecar) | "neutts" (local) | "kittentts" (local)
         "edge": {
             "voice": "en-US-AriaNeural",
             # Popular: AriaNeural, JennyNeural, AndrewNeural, BrianNeural, SoniaNeural
@@ -660,6 +660,12 @@ DEFAULT_CONFIG = {
         "mistral": {
             "model": "voxtral-mini-tts-2603",
             "voice_id": "c69964a6-ab8b-4f8a-9465-ec0925096ec8",  # Paul - Neutral
+        },
+        "neutts-air": {
+            "base_url": "http://neutts-air:8000" if _is_container() else "http://127.0.0.1:9099",
+            "ref_audio": "",  # Optional path to reference voice audio for cloning
+            "ref_text": "",   # Optional transcript string or path for reference audio
+            "timeout_seconds": 120,
         },
         "neutts": {
             "ref_audio": "",  # Path to reference voice audio (empty = bundled default)

@@ -456,6 +456,8 @@ def _print_setup_summary(config: dict, hermes_home):
         tool_status.append(("Text-to-Speech (Mistral Voxtral)", True, None))
     elif tts_provider == "gemini" and (get_env_value("GEMINI_API_KEY") or get_env_value("GOOGLE_API_KEY")):
         tool_status.append(("Text-to-Speech (Google Gemini)", True, None))
+    elif tts_provider == "neutts-air":
+        tool_status.append(("Text-to-Speech (NeuTTS Air sidecar)", True, None))
     elif tts_provider == "neutts":
         try:
             neutts_ok = importlib.util.find_spec("neutts") is not None
@@ -962,7 +964,7 @@ def _install_kittentts_deps() -> bool:
 
 
 def _setup_tts_provider(config: dict):
-    """Interactive TTS provider selection with install flow for NeuTTS."""
+    """Interactive TTS provider selection with install flows for local providers."""
     tts_config = config.get("tts", {})
     current_provider = tts_config.get("provider", "edge")
     subscription_features = get_nous_subscription_features(config)
@@ -975,6 +977,7 @@ def _setup_tts_provider(config: dict):
         "minimax": "MiniMax TTS",
         "mistral": "Mistral Voxtral TTS",
         "gemini": "Google Gemini TTS",
+        "neutts-air": "NeuTTS Air",
         "neutts": "NeuTTS",
         "kittentts": "KittenTTS",
     }
@@ -999,11 +1002,12 @@ def _setup_tts_provider(config: dict):
             "MiniMax TTS (high quality with voice cloning, needs API key)",
             "Mistral Voxtral TTS (multilingual, native Opus, needs API key)",
             "Google Gemini TTS (30 prebuilt voices, prompt-controllable, needs API key)",
+            "NeuTTS Air (local sidecar, free, uses the FastAPI sidecar service)",
             "NeuTTS (local on-device, free, ~300MB model download)",
             "KittenTTS (local on-device, free, lightweight ~25-80MB ONNX)",
         ]
     )
-    providers.extend(["edge", "elevenlabs", "openai", "xai", "minimax", "mistral", "gemini", "neutts", "kittentts"])
+    providers.extend(["edge", "elevenlabs", "openai", "xai", "minimax", "mistral", "gemini", "neutts-air", "neutts", "kittentts"])
     choices.append(f"Keep current ({current_label})")
     keep_current_idx = len(choices) - 1
     idx = prompt_choice("Select TTS provider:", choices, keep_current_idx)
