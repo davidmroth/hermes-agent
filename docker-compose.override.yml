@@ -175,6 +175,12 @@ services:
       - .data/briefing:/data
     ports:
       - "${BRIEFING_RENDERER_PORT:-9910}:8080"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
 
 volumes:
   sandbox_workspace:
