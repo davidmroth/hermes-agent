@@ -170,6 +170,7 @@ services:
     environment:
       BRIEFING_RENDERER_DATA_DIR: /data
       BRIEFING_RENDERER_SERVICE_TOKEN: ${BRIEFING_RENDERER_SERVICE_TOKEN:-}
+      BRIEFING_RENDERER_MAX_CONCURRENT_JOBS: 1
     volumes:
       - .services/briefing-service:/app
       - .data/briefing:/data
