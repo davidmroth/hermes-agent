@@ -162,7 +162,7 @@ services:
     build:
       context: .
       dockerfile: .services/briefing-service/Dockerfile
-    restart: unless-stopped
+    restart: always
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
     working_dir: /app
     env_file:
@@ -175,7 +175,6 @@ services:
       - .data/briefing:/data
     ports:
       - "${BRIEFING_RENDERER_PORT:-9910}:8080"
-    restart: unless-stopped
     logging:
       driver: "json-file"
       options:
