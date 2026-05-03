@@ -2119,6 +2119,31 @@ class TestRunConversation:
         assert result["final_response"] == "Final answer"
         assert result["completed"] is True
 
+    def test_turn_start_log_includes_active_tools_and_toolsets(self, agent, caplog):
+        self._setup_agent(agent)
+        resp = _mock_response(content="Final answer", finish_reason="stop")
+        agent.client.chat.completions.create.return_value = resp
+
+        with (
+            patch("run_agent.get_toolset_for_tool", side_effect={"web_search": "web"}.get),
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+            caplog.at_level(logging.INFO, logger="run_agent"),
+        ):
+            result = agent.run_conversation("hello")
+
+        assert result["completed"] is True
+        turn_logs = [
+            record.message for record in caplog.records
+            if record.message.startswith("conversation turn:")
+        ]
+        assert turn_logs
+        assert "tools=1" in turn_logs[-1]
+        assert "toolsets=1" in turn_logs[-1]
+        assert "active_tools=['web_search']" in turn_logs[-1]
+        assert "active_toolsets=['web']" in turn_logs[-1]
+
     def test_tool_calls_then_stop(self, agent):
         self._setup_agent(agent)
         tc = _mock_tool_call(name="web_search", arguments="{}", call_id="c1")

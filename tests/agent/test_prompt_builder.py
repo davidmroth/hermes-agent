@@ -989,6 +989,48 @@ class TestBuildSkillsSystemPromptConditional:
         result = build_skills_system_prompt()
         assert "duckduckgo" in result
 
+    def test_briefing_primary_and_fallback_skills_swap_with_renderer_tool(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+        primary_dir = tmp_path / "skills" / "research" / "rendered-briefing"
+        primary_dir.mkdir(parents=True)
+        (primary_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: rendered-briefing\n"
+            "description: Renderer-backed briefing\n"
+            "metadata:\n"
+            "  hermes:\n"
+            "    requires_tools: [create_briefing]\n"
+            "---\n"
+        )
+
+        fallback_dir = tmp_path / "skills" / "research" / "briefing-html-fallback"
+        fallback_dir.mkdir(parents=True)
+        (fallback_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: briefing-html-fallback\n"
+            "description: HTML fallback briefing\n"
+            "metadata:\n"
+            "  hermes:\n"
+            "    fallback_for_tools: [create_briefing]\n"
+            "    requires_tools: [write_file, send_html_to_webchat]\n"
+            "---\n"
+        )
+
+        renderer_prompt = build_skills_system_prompt(
+            available_tools={"create_briefing", "write_file", "send_html_to_webchat"},
+            available_toolsets=set(),
+        )
+        assert "rendered-briefing" in renderer_prompt
+        assert "briefing-html-fallback" not in renderer_prompt
+
+        fallback_prompt = build_skills_system_prompt(
+            available_tools={"write_file", "send_html_to_webchat"},
+            available_toolsets=set(),
+        )
+        assert "rendered-briefing" not in fallback_prompt
+        assert "briefing-html-fallback" in fallback_prompt
+
     def test_null_metadata_does_not_crash(self, monkeypatch, tmp_path):
         """Regression: metadata key present but null should not AttributeError."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))

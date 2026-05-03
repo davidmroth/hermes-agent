@@ -10,6 +10,7 @@ metadata:
     tags: [Research, Briefing, Audio, HTML, Sources, Executive Summary]
     category: research
     related_skills: [arxiv, blogwatcher, research-paper-writing, plan]
+      requires_tools: [create_briefing]
 ---
 
 # Rendered Research Briefings
