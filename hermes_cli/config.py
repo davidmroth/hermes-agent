@@ -474,6 +474,15 @@ DEFAULT_CONFIG = {
         },
     },
 
+    "briefing": {
+        # Empty = runtime default based on environment.
+        # Docker Compose prefers http://briefing:8080, host CLI prefers http://127.0.0.1:9910.
+        "renderer_base_url": "",
+        "request_timeout_seconds": 20,
+        "poll_interval_seconds": 1.0,
+        "max_wait_seconds": 90,
+    },
+
     # Filesystem checkpoints — automatic snapshots before destructive file ops.
     # When enabled, the agent takes a snapshot of the working directory once per
     # conversation turn (on first write_file/patch call).  Use /rollback to restore.
@@ -1411,6 +1420,14 @@ OPTIONAL_ENV_VARS = {
         "prompt": "Tavily API key",
         "url": "https://app.tavily.com/home",
         "tools": ["web_search", "web_extract", "web_crawl"],
+        "password": True,
+        "category": "tool",
+    },
+    "BRIEFING_RENDERER_SERVICE_TOKEN": {
+        "description": "Bearer token for the briefing renderer service",
+        "prompt": "Briefing renderer service token",
+        "url": None,
+        "tools": ["create_briefing"],
         "password": True,
         "category": "tool",
     },

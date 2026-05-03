@@ -31,6 +31,8 @@ from typing import List, Dict, Any, Set, Optional
 _HERMES_CORE_TOOLS = [
     # Web
     "web_search", "web_extract",
+    # Briefing renderer
+    "create_briefing",
     # Terminal + process management
     "terminal", "process",
     # File manipulation
@@ -155,6 +157,12 @@ TOOLSETS = {
     "tts": {
         "description": "Text-to-speech: convert text to audio with Edge TTS (free), ElevenLabs, OpenAI, or xAI",
         "tools": ["text_to_speech"],
+        "includes": []
+    },
+
+    "briefing": {
+        "description": "Structured multimedia briefing rendering via the briefing renderer service",
+        "tools": ["create_briefing"],
         "includes": []
     },
     

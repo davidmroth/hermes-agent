@@ -45,6 +45,7 @@ TOOL_KIND_MAP: Dict[str, ToolKind] = {
     "delegate_task": "execute",
     "vision_analyze": "read",
     "image_generate": "execute",
+    "create_briefing": "execute",
     "text_to_speech": "execute",
     # Thinking / meta
     "_thinking": "think",
@@ -85,6 +86,11 @@ def build_tool_title(tool_name: str, args: Dict[str, Any]) -> str:
         if urls:
             return f"extract: {urls[0]}" + (f" (+{len(urls)-1})" if len(urls) > 1 else "")
         return "web extract"
+    if tool_name == "create_briefing":
+        title = str(args.get("title") or args.get("topic") or "briefing")
+        if len(title) > 80:
+            title = title[:77] + "..."
+        return f"briefing: {title}"
     if tool_name == "delegate_task":
         goal = args.get("goal", "")
         if goal and len(goal) > 60:
