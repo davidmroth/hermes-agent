@@ -54,6 +54,7 @@ services:
       - MAX_TABS_PER_SESSION=5
       - SESSION_TIMEOUT_MS=1800000
       - BROWSER_IDLE_TIMEOUT_MS=300000
+      - NODE_OPTIONS=--max-old-space-size=4096
     volumes:
       - .data/camofox:/data
     healthcheck:

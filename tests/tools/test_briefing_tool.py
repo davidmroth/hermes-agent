@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 import httpx
 
@@ -155,6 +156,98 @@ def test_create_briefing_returns_clear_auth_error(monkeypatch):
 
     assert result["success"] is False
     assert "BRIEFING_RENDERER_SERVICE_TOKEN" in result["error"]
+
+
+def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
+    captured_request = {}
+    expected_job_id = uuid.uuid5(uuid.NAMESPACE_URL, "briefing:shipping-risk-20260502-120000").hex
+
+    accepted = {
+        "job_id": expected_job_id,
+        "status": "processing",
+        "status_url": f"/v1/briefings/{expected_job_id}",
+        "result_url": f"/v1/briefings/{expected_job_id}/result",
+    }
+    completed_status = {
+        "job_id": expected_job_id,
+        "briefing_id": "shipping-risk-20260502-120000",
+        "status": "completed",
+        "created_at": "2026-05-02T12:00:00+00:00",
+        "completed_at": "2026-05-02T12:00:01+00:00",
+        "manifest_path": "briefing.json",
+        "asset_count": 4,
+        "validation": {"valid": True, "warnings": [], "errors": []},
+    }
+    result_payload = {
+        "schema_version": "briefing-renderer/v1",
+        "render_mode": "synthetic-v1",
+        "job_id": expected_job_id,
+        "briefing_id": "shipping-risk-20260502-120000",
+        "title": "Shipping Risk Briefing",
+        "topic": "North Atlantic shipping disruption risk",
+        "summary": "A concise risk snapshot for operators.",
+        "generated_at": "2026-05-02T12:00:01+00:00",
+        "locale": "en-US",
+        "generated_by": "hermes",
+        "manifest_path": "briefing.json",
+        "asset_base_path": f"/v1/briefings/{expected_job_id}/assets",
+        "standalone_html_path": "briefing.html",
+        "audio_path": "narration.wav",
+        "sections": [{"id": "risk", "title": "Risk", "narration": "Ports are congested.", "body": [], "metrics": [], "illustrations": [], "citations": [], "sentences": [], "start": 0.0, "end": 4.0}],
+        "sources": [{"id": "s1", "title": "Port update", "publisher": "Lloyd's List", "url": "https://example.com/port-update"}],
+        "timeline_cues": [],
+        "assets": [
+            {"role": "audio", "path": "narration.wav", "content_type": "audio/wav", "size_bytes": 12, "sha256": "a", "cache_control": "private, max-age=300"},
+            {"role": "standalone_html", "path": "briefing.html", "content_type": "text/html", "size_bytes": 12, "sha256": "b", "cache_control": "private, max-age=300"},
+        ],
+        "validation": {"valid": True, "warnings": [], "errors": []},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == f"/v1/briefings/{expected_job_id}":
+            return httpx.Response(200, json=completed_status)
+        if request.method == "GET" and request.url.path == f"/v1/briefings/{expected_job_id}/result":
+            return httpx.Response(200, json=result_payload)
+        if request.method == "POST" and request.url.path == "/v1/briefings":
+            captured_request["json"] = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(202, json=accepted)
+        if request.method == "GET" and request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(
+        "tools.briefing_tool.load_config",
+        lambda: {
+            "briefing": {
+                "renderer_base_url": "http://renderer.test",
+                "request_timeout_seconds": 5,
+                "poll_interval_seconds": 0,
+                "max_wait_seconds": 15,
+            }
+        },
+    )
+    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+
+    result = json.loads(
+        create_briefing_tool(
+            {
+                "briefing_id": "shipping-risk-20260502-120000",
+                "title": "Shipping Risk Briefing",
+                "topic": "North Atlantic shipping disruption risk",
+                "sections": [
+                    {
+                        "id": "risk",
+                        "title": "Immediate Risk",
+                        "narration": "Ports are congested and delays are extending into next week.",
+                    }
+                ],
+            }
+        )
+    )
+
+    assert result["success"] is True
+    assert result["job_id"] == expected_job_id
+    assert captured_request["json"]["job_id"] == expected_job_id
 
 
 def test_check_briefing_requirements_uses_health_probe(monkeypatch):

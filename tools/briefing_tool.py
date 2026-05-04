@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
+import uuid
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -72,6 +73,7 @@ class SectionInput(BaseModel):
 
 
 class BriefingRequest(BaseModel):
+    job_id: str | None = None
     briefing_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     topic: str = Field(min_length=1)
@@ -108,6 +110,10 @@ CREATE_BRIEFING_SCHEMA = {
     "parameters": {
         "type": "object",
         "properties": {
+            "job_id": {
+                "type": "string",
+                "description": "Optional stable renderer job id. If omitted, Hermes derives one deterministically from briefing_id."
+            },
             "briefing_id": {
                 "type": "string",
                 "description": "Optional stable ID for the briefing. If omitted, Hermes generates one from the title and timestamp."
@@ -293,6 +299,10 @@ def _auto_briefing_id(title: str) -> str:
     return f"{_slugify(title)}-{timestamp}"
 
 
+def _derive_job_id(briefing_id: str) -> str:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"briefing:{briefing_id}").hex
+
+
 def _headers() -> dict[str, str]:
     token = _resolve_service_token()
     return {"Authorization": f"Bearer {token}"} if token else {}
@@ -315,6 +325,8 @@ def _normalize_request_payload(args: dict[str, Any]) -> dict[str, Any]:
     }
     if not payload.get("briefing_id"):
         payload["briefing_id"] = _auto_briefing_id(str(payload.get("title") or "briefing"))
+    if not payload.get("job_id"):
+        payload["job_id"] = _derive_job_id(str(payload["briefing_id"]))
     if not payload.get("generated_by"):
         payload["generated_by"] = "hermes"
     if not payload.get("locale"):
