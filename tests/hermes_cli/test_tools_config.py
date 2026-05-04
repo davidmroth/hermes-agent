@@ -566,6 +566,15 @@ class TestPlatformToolsetConsistency:
             )
 
 
+def test_get_platform_tools_default_webchat_uses_fallback_toolset():
+    from hermes_cli.tools_config import _get_platform_tools
+
+    enabled = _get_platform_tools({}, "webchat")
+
+    assert "terminal" in enabled
+    assert "file" in enabled
+
+
 def test_numeric_mcp_server_name_does_not_crash_sorted():
     """YAML parses bare numeric keys (e.g. ``12306:``) as int.
 

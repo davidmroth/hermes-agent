@@ -120,6 +120,38 @@ class TestGetConnectedPlatforms:
         )
         assert Platform.DINGTALK not in config.get_connected_platforms()
 
+    def test_webchat_requires_token_and_url(self):
+        config = GatewayConfig(
+            platforms={
+                Platform.WEBCHAT: PlatformConfig(
+                    enabled=True,
+                    token="svc-token",
+                    extra={"url": "http://webui:3000"},
+                ),
+            },
+        )
+        assert Platform.WEBCHAT in config.get_connected_platforms()
+
+        config.platforms[Platform.WEBCHAT] = PlatformConfig(enabled=True, token="svc-token", extra={})
+        assert Platform.WEBCHAT not in config.get_connected_platforms()
+
+
+class TestWebchatEnvOverrides:
+    def test_webchat_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("WEBCHAT_ENABLED", "true")
+        monkeypatch.setenv("WEBCHAT_URL", "http://webui:3000")
+        monkeypatch.setenv("WEBCHAT_SERVICE_TOKEN", "svc-token")
+        monkeypatch.setenv("WEBCHAT_POLL_INTERVAL", "2.5")
+
+        config = GatewayConfig()
+        _apply_env_overrides(config)
+
+        assert Platform.WEBCHAT in config.platforms
+        assert config.platforms[Platform.WEBCHAT].enabled is True
+        assert config.platforms[Platform.WEBCHAT].token == "svc-token"
+        assert config.platforms[Platform.WEBCHAT].extra["url"] == "http://webui:3000"
+        assert config.platforms[Platform.WEBCHAT].extra["poll_interval"] == 2.5
+
 
 class TestSessionResetPolicy:
     def test_roundtrip(self):
