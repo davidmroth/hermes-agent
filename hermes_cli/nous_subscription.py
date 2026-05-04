@@ -152,9 +152,14 @@ def _tts_label(current_provider: str) -> str:
         "openai": "OpenAI TTS",
         "elevenlabs": "ElevenLabs",
         "edge": "Edge TTS",
+        "minimax": "MiniMax TTS",
         "xai": "xAI TTS",
         "mistral": "Mistral Voxtral TTS",
+        "gemini": "Google Gemini TTS",
+        "neutts-air": "NeuTTS Air",
         "neutts": "NeuTTS",
+        "kittentts": "KittenTTS",
+        "piper": "Piper",
     }
     return mapping.get(current_provider or "edge", current_provider or "Edge TTS")
 
@@ -341,10 +346,15 @@ def get_nous_subscription_features(
         and not direct_openai_tts
     )
     tts_available = bool(
-        tts_current_provider in {"edge", "neutts"}
+        tts_current_provider in {"edge", "neutts-air", "neutts"}
         or (tts_current_provider == "openai" and (managed_tts_available or direct_openai_tts))
         or (tts_current_provider == "elevenlabs" and direct_elevenlabs)
+        or (tts_current_provider == "xai" and bool(get_env_value("XAI_API_KEY")))
+        or (tts_current_provider == "minimax" and bool(get_env_value("MINIMAX_API_KEY")))
         or (tts_current_provider == "mistral" and bool(get_env_value("MISTRAL_API_KEY")))
+        or (tts_current_provider == "gemini" and bool(get_env_value("GEMINI_API_KEY") or get_env_value("GOOGLE_API_KEY")))
+        or (tts_current_provider == "kittentts")
+        or (tts_current_provider == "piper")
     )
     tts_active = bool(tts_tool_enabled and tts_available)
 

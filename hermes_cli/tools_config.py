@@ -59,6 +59,7 @@ CONFIGURABLE_TOOLSETS = [
     ("image_gen",       "🎨 Image Generation",          "image_generate"),
     ("moa",             "🧠 Mixture of Agents",         "mixture_of_agents"),
     ("tts",             "🔊 Text-to-Speech",            "text_to_speech"),
+    ("briefing",        "📰 Rendered Briefings",       "create_briefing"),
     ("skills",          "📚 Skills",                    "list, view, manage"),
     ("todo",            "📋 Task Planning",             "todo"),
     ("memory",          "💾 Memory",                    "persistent memory across sessions"),
@@ -218,6 +219,13 @@ TOOL_CATEGORIES = {
                     {"key": "GEMINI_API_KEY", "prompt": "Gemini API key", "url": "https://aistudio.google.com/app/apikey"},
                 ],
                 "tts_provider": "gemini",
+            },
+            {
+                "name": "NeuTTS Air",
+                "badge": "local sidecar · free",
+                "tag": "Local HTTP sidecar for NeuTTS synthesis, no API key",
+                "env_vars": [],
+                "tts_provider": "neutts-air",
             },
             {
                 "name": "KittenTTS",

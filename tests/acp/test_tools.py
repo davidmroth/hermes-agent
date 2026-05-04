@@ -25,7 +25,7 @@ from acp.schema import (
 # ---------------------------------------------------------------------------
 
 
-COMMON_HERMES_TOOLS = ["read_file", "search_files", "terminal", "patch", "write_file", "process"]
+COMMON_HERMES_TOOLS = ["read_file", "search_files", "terminal", "patch", "write_file", "process", "create_briefing"]
 
 
 class TestToolKindMap:
@@ -109,6 +109,10 @@ class TestBuildToolTitle:
     def test_web_search_title(self):
         title = build_tool_title("web_search", {"query": "python asyncio"})
         assert "python asyncio" in title
+
+    def test_create_briefing_title(self):
+        title = build_tool_title("create_briefing", {"title": "Daily Briefing"})
+        assert title == "briefing: Daily Briefing"
 
     def test_unknown_tool_uses_name(self):
         title = build_tool_title("some_new_tool", {"foo": "bar"})

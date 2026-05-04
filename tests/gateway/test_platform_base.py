@@ -329,6 +329,16 @@ class TestExtractMedia:
         assert media == [("/tmp/Jane Doe/speech.flac", False)]
         assert cleaned == ""
 
+    def test_media_tag_supports_document_and_code_paths(self):
+        content = "MEDIA:/tmp/report.html\nMEDIA:/tmp/data.json\nMEDIA:/tmp/script.py"
+        media, cleaned = BasePlatformAdapter.extract_media(content)
+        assert media == [
+            ("/tmp/report.html", False),
+            ("/tmp/data.json", False),
+            ("/tmp/script.py", False),
+        ]
+        assert cleaned == ""
+
 
 # ---------------------------------------------------------------------------
 # should_send_media_as_audio

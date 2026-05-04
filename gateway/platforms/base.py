@@ -1770,8 +1770,26 @@ class BasePlatformAdapter(ABC):
         
         # Extract MEDIA:<path> tags, allowing optional whitespace after the colon
         # and quoted/backticked paths for LLM-formatted outputs.
+        _LOCAL_MEDIA_EXTS = (
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".mov", ".avi", ".mkv", ".webm",
+            ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac",
+        )
+        _LOCAL_DOC_EXTS = (
+            ".epub", ".pdf", ".md", ".txt", ".csv", ".json", ".html", ".htm",
+            ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".rtf",
+            ".zip", ".tar", ".gz", ".7z", ".rar", ".apk", ".ipa",
+            ".log", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+            ".py", ".js", ".ts", ".sh", ".bash", ".sql",
+        )
+        ext_part = "|".join(
+            ext.lstrip(".") for ext in (_LOCAL_MEDIA_EXTS + _LOCAL_DOC_EXTS)
+        )
         media_pattern = re.compile(
-            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:png|jpe?g|gif|webp|mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a|flac|epub|pdf|zip|rar|7z|docx?|xlsx?|pptx?|txt|csv|apk|ipa)(?=[\s`"',;:)\]}]|$)|\S+)[`"']?'''
+            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:'''
+            + ext_part
+            + r''')(?=[\s`"',;:)\]}]|$)|\S+)[`"']?''',
+            re.IGNORECASE,
         )
         for match in media_pattern.finditer(content):
             path = match.group("path").strip()
@@ -1806,10 +1824,19 @@ class BasePlatformAdapter(ABC):
             raw path strings removed).
         """
         _LOCAL_MEDIA_EXTS = (
-            '.png', '.jpg', '.jpeg', '.gif', '.webp',
-            '.mp4', '.mov', '.avi', '.mkv', '.webm',
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".mov", ".avi", ".mkv", ".webm",
         )
-        ext_part = '|'.join(e.lstrip('.') for e in _LOCAL_MEDIA_EXTS)
+        _LOCAL_DOC_EXTS = (
+            ".pdf", ".md", ".txt", ".csv", ".json", ".html", ".htm",
+            ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".rtf",
+            ".zip", ".tar", ".gz", ".7z", ".rar",
+            ".log", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+            ".py", ".js", ".ts", ".sh", ".bash", ".sql",
+        )
+        ext_part = '|'.join(
+            e.lstrip('.') for e in (_LOCAL_MEDIA_EXTS + _LOCAL_DOC_EXTS)
+        )
 
         # (?<![/:\w.]) prevents matching inside URLs (e.g. https://…/img.png)
         #             and relative paths (./foo.png)
@@ -2796,6 +2823,27 @@ class BasePlatformAdapter(ABC):
         except Exception as e:
             await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)
             logger.error("[%s] Error handling message: %s", self.name, e, exc_info=True)
+            try:
+                from gateway.error_debug import log_exception_diagnostics
+
+                log_exception_diagnostics(
+                    logger,
+                    e,
+                    context="platform_message_handler",
+                    fields={
+                        "platform": self.name,
+                        "chat_id": getattr(event.source, "chat_id", None),
+                        "thread_id": getattr(event.source, "thread_id", None),
+                        "message_id": getattr(event, "message_id", None),
+                        "message_type": getattr(
+                            getattr(event, "message_type", None),
+                            "value",
+                            None,
+                        ),
+                    },
+                )
+            except Exception:
+                pass
             # Send the error to the user so they aren't left with radio silence
             try:
                 error_type = type(e).__name__
