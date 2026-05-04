@@ -172,6 +172,7 @@ services:
       BRIEFING_RENDERER_DATA_DIR: /data
       BRIEFING_RENDERER_SERVICE_TOKEN: ${BRIEFING_RENDERER_SERVICE_TOKEN:-}
       BRIEFING_RENDERER_MAX_CONCURRENT_JOBS: 1
+      BRIEFING_RENDERER_NARRATION_MODE: fast
     volumes:
       - .services/briefing-service:/app
       - .data/briefing:/data

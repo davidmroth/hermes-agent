@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 
 import httpx
 
@@ -158,18 +157,18 @@ def test_create_briefing_returns_clear_auth_error(monkeypatch):
     assert "BRIEFING_RENDERER_SERVICE_TOKEN" in result["error"]
 
 
-def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
+def test_create_briefing_does_not_send_job_id(monkeypatch):
     captured_request = {}
-    expected_job_id = uuid.uuid5(uuid.NAMESPACE_URL, "briefing:shipping-risk-20260502-120000").hex
+    returned_job_id = "server-generated-job-123"
 
     accepted = {
-        "job_id": expected_job_id,
+        "job_id": returned_job_id,
         "status": "processing",
-        "status_url": f"/v1/briefings/{expected_job_id}",
-        "result_url": f"/v1/briefings/{expected_job_id}/result",
+        "status_url": f"/v1/briefings/{returned_job_id}",
+        "result_url": f"/v1/briefings/{returned_job_id}/result",
     }
     completed_status = {
-        "job_id": expected_job_id,
+        "job_id": returned_job_id,
         "briefing_id": "shipping-risk-20260502-120000",
         "status": "completed",
         "created_at": "2026-05-02T12:00:00+00:00",
@@ -181,7 +180,7 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
     result_payload = {
         "schema_version": "briefing-renderer/v1",
         "render_mode": "synthetic-v1",
-        "job_id": expected_job_id,
+        "job_id": returned_job_id,
         "briefing_id": "shipping-risk-20260502-120000",
         "title": "Shipping Risk Briefing",
         "topic": "North Atlantic shipping disruption risk",
@@ -190,7 +189,7 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
         "locale": "en-US",
         "generated_by": "hermes",
         "manifest_path": "briefing.json",
-        "asset_base_path": f"/v1/briefings/{expected_job_id}/assets",
+        "asset_base_path": f"/v1/briefings/{returned_job_id}/assets",
         "standalone_html_path": "briefing.html",
         "audio_path": "narration.wav",
         "sections": [{"id": "risk", "title": "Risk", "narration": "Ports are congested.", "body": [], "metrics": [], "illustrations": [], "citations": [], "sentences": [], "start": 0.0, "end": 4.0}],
@@ -204,9 +203,9 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and request.url.path == f"/v1/briefings/{expected_job_id}":
+        if request.method == "GET" and request.url.path == f"/v1/briefings/{returned_job_id}":
             return httpx.Response(200, json=completed_status)
-        if request.method == "GET" and request.url.path == f"/v1/briefings/{expected_job_id}/result":
+        if request.method == "GET" and request.url.path == f"/v1/briefings/{returned_job_id}/result":
             return httpx.Response(200, json=result_payload)
         if request.method == "POST" and request.url.path == "/v1/briefings":
             captured_request["json"] = json.loads(request.content.decode("utf-8"))
@@ -246,8 +245,8 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
     )
 
     assert result["success"] is True
-    assert result["job_id"] == expected_job_id
-    assert captured_request["json"]["job_id"] == expected_job_id
+    assert result["job_id"] == returned_job_id
+    assert "job_id" not in captured_request["json"]
 
 
 def test_check_briefing_requirements_uses_health_probe(monkeypatch):

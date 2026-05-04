@@ -110,10 +110,6 @@ CREATE_BRIEFING_SCHEMA = {
     "parameters": {
         "type": "object",
         "properties": {
-            "job_id": {
-                "type": "string",
-                "description": "Optional stable renderer job id. If omitted, Hermes derives one deterministically from briefing_id."
-            },
             "briefing_id": {
                 "type": "string",
                 "description": "Optional stable ID for the briefing. If omitted, Hermes generates one from the title and timestamp."
@@ -299,10 +295,6 @@ def _auto_briefing_id(title: str) -> str:
     return f"{_slugify(title)}-{timestamp}"
 
 
-def _derive_job_id(briefing_id: str) -> str:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"briefing:{briefing_id}").hex
-
-
 def _headers() -> dict[str, str]:
     token = _resolve_service_token()
     return {"Authorization": f"Bearer {token}"} if token else {}
@@ -321,12 +313,10 @@ def _normalize_request_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload = {
         key: value
         for key, value in args.items()
-        if key not in {"wait_for_completion", "max_wait_seconds", "poll_interval_seconds"}
+        if key not in {"job_id", "wait_for_completion", "max_wait_seconds", "poll_interval_seconds"}
     }
     if not payload.get("briefing_id"):
         payload["briefing_id"] = _auto_briefing_id(str(payload.get("title") or "briefing"))
-    if not payload.get("job_id"):
-        payload["job_id"] = _derive_job_id(str(payload["briefing_id"]))
     if not payload.get("generated_by"):
         payload["generated_by"] = "hermes"
     if not payload.get("locale"):
@@ -410,7 +400,7 @@ def create_briefing_tool(args: dict[str, Any], **_kw) -> str:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             create_response = client.post(
                 _absolute_url(base_url, "/v1/briefings"),
-                json=request.model_dump(mode="json"),
+                json=request.model_dump(mode="json", exclude_none=True),
                 headers=_headers(),
             )
             _raise_for_error_response(create_response, "Briefing renderer failed to create the job.")
