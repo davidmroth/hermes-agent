@@ -18,6 +18,7 @@ services:
         required: false
     volumes:
       - .data/hermes:/opt/data
+      - .data/hermes/.venv:/opt/hermes/.venv
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py
