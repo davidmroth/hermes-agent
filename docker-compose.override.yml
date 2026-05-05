@@ -41,6 +41,7 @@ services:
       # Point to the actual IP of your llama.cpp server.
       # Change this if ai.local moves to a different IP.
       - "ai.local:192.168.87.153"
+    network_mode: !bridge
     depends_on:
       camofox:
         condition: service_healthy
@@ -53,6 +54,7 @@ services:
   dashboard:
     volumes:
       - .data/hermes:/opt/data
+    network_mode: !bridge
 
   # ---------------------------------------------------------------------------
   # Camofox — Local anti-detection browser (Firefox/Camoufox)
@@ -134,7 +136,7 @@ services:
       options:
         max-file: "3"
         max-size: "10m"
-
+  
   # ---------------------------------------------------------------------------
   # OpenCode — ACP sidecar backend for Hermes
   # Hermes reaches this container via `docker exec ... opencode acp --cwd
