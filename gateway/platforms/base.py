@@ -2545,6 +2545,15 @@ class BasePlatformAdapter(ABC):
         self._active_sessions[session_key] = interrupt_event
         callback_generation = getattr(interrupt_event, "_hermes_run_generation", None)
         
+        def _build_delivery_metadata() -> Optional[dict]:
+            metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+            if self.platform == Platform.WEBCHAT:
+                timings = getattr(event, "_hermes_timings", None)
+                if timings:
+                    metadata = dict(metadata or {})
+                    metadata["timings"] = timings
+            return metadata
+
         # Start continuous typing indicator (refreshes every 2 seconds)
         _thread_metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
         _keep_typing_kwargs = {"metadata": _thread_metadata}
@@ -2599,6 +2608,8 @@ class BasePlatformAdapter(ABC):
             if not response:
                 logger.debug("[%s] Handler returned empty/None response for %s", self.name, event.source.chat_id)
             if response:
+                _delivery_metadata = _build_delivery_metadata()
+
                 # Extract MEDIA:<path> tags (from TTS tool) before other processing
                 media_files, response = self.extract_media(response)
                 
@@ -2646,7 +2657,7 @@ class BasePlatformAdapter(ABC):
                         await self.play_tts(
                             chat_id=event.source.chat_id,
                             audio_path=_tts_path,
-                            metadata=_thread_metadata,
+                            metadata=_delivery_metadata,
                         )
                     finally:
                         try:
@@ -2661,7 +2672,7 @@ class BasePlatformAdapter(ABC):
                         chat_id=event.source.chat_id,
                         content=text_content,
                         reply_to=event.message_id,
-                        metadata=_thread_metadata,
+                        metadata=_delivery_metadata,
                     )
                     _record_delivery(result)
 
@@ -2675,7 +2686,7 @@ class BasePlatformAdapter(ABC):
                         await self.send_multiple_images(
                             chat_id=event.source.chat_id,
                             images=images,
-                            metadata=_thread_metadata,
+                            metadata=_delivery_metadata,
                             human_delay=human_delay,
                         )
                     except Exception as batch_err:
@@ -2710,7 +2721,7 @@ class BasePlatformAdapter(ABC):
                         await self.send_multiple_images(
                             chat_id=event.source.chat_id,
                             images=_batch,
-                            metadata=_thread_metadata,
+                            metadata=_delivery_metadata,
                             human_delay=human_delay,
                         )
                     except Exception as batch_err:
@@ -2725,19 +2736,19 @@ class BasePlatformAdapter(ABC):
                             media_result = await self.send_voice(
                                 chat_id=event.source.chat_id,
                                 audio_path=media_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                         elif ext in _VIDEO_EXTS:
                             media_result = await self.send_video(
                                 chat_id=event.source.chat_id,
                                 video_path=media_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                         else:
                             media_result = await self.send_document(
                                 chat_id=event.source.chat_id,
                                 file_path=media_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
 
                         if not media_result.success:
@@ -2755,13 +2766,13 @@ class BasePlatformAdapter(ABC):
                             await self.send_video(
                                 chat_id=event.source.chat_id,
                                 video_path=file_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                         else:
                             await self.send_document(
                                 chat_id=event.source.chat_id,
                                 file_path=file_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                     except Exception as file_err:
                         logger.error("[%s] Error sending local file %s: %s", self.name, file_path, file_err)

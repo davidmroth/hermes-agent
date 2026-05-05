@@ -219,6 +219,7 @@ export const en: Translations = {
       telegram: "Telegram",
       discord: "Discord",
       slack: "Slack",
+      webui: "Web UI",
       email: "Email",
     },
   },

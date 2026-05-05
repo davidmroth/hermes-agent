@@ -575,6 +575,17 @@ def test_get_platform_tools_default_webchat_uses_fallback_toolset():
     assert "file" in enabled
 
 
+def test_get_enabled_platforms_includes_webchat(monkeypatch):
+    from hermes_cli.tools_config import _get_enabled_platforms
+
+    monkeypatch.setenv("WEBCHAT_SERVICE_TOKEN", "svc-token")
+    monkeypatch.setenv("WEBCHAT_URL", "http://webui:3000")
+
+    enabled = _get_enabled_platforms()
+
+    assert "webchat" in enabled
+
+
 def test_numeric_mcp_server_name_does_not_crash_sorted():
     """YAML parses bare numeric keys (e.g. ``12306:``) as int.
 

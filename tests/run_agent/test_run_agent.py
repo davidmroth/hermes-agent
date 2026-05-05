@@ -251,6 +251,90 @@ def _mock_response(
     return resp
 
 
+class TestLlamaCppTimingsExtraction:
+    def test_extract_llamacpp_timings_from_top_level_field(self, agent):
+        source = SimpleNamespace(
+            timings={
+                "prompt_n": 12,
+                "prompt_ms": 34.5,
+                "predicted_n": 7,
+                "predicted_ms": 89.0,
+                "cache_n": 2,
+                "ignored": "x",
+            }
+        )
+
+        assert agent._extract_llamacpp_timings(source) == {
+            "prompt_n": 12,
+            "prompt_ms": 34.5,
+            "predicted_n": 7,
+            "predicted_ms": 89.0,
+            "cache_n": 2,
+        }
+
+    def test_extract_llamacpp_timings_from_usage_field(self, agent):
+        source = SimpleNamespace(
+            usage=SimpleNamespace(
+                timings={
+                    "prompt_n": 5,
+                    "prompt_ms": 10.0,
+                    "predicted_n": 6,
+                    "predicted_ms": 11.0,
+                }
+            )
+        )
+
+        assert agent._extract_llamacpp_timings(source) == {
+            "prompt_n": 5,
+            "prompt_ms": 10.0,
+            "predicted_n": 6,
+            "predicted_ms": 11.0,
+        }
+
+    def test_extract_llamacpp_timings_from_native_usage_fields(self, agent):
+        source = SimpleNamespace(
+            usage=SimpleNamespace(
+                prompt_eval_count=48,
+                prompt_eval_duration=125_000_000,
+                eval_count=96,
+                eval_duration=640_000_000,
+                prompt_per_second=384.0,
+                predicted_per_second=150.0,
+            )
+        )
+
+        assert agent._extract_llamacpp_timings(source) == {
+            "prompt_eval_count": 48,
+            "prompt_eval_duration": 125_000_000,
+            "eval_count": 96,
+            "eval_duration": 640_000_000,
+            "prompt_per_second": 384.0,
+            "predicted_per_second": 150.0,
+        }
+
+    def test_extract_llamacpp_timings_from_model_dump(self, agent):
+        class DumpOnly:
+            def model_dump(self, mode="python"):
+                assert mode == "python"
+                return {
+                    "usage": {
+                        "timings": {
+                            "prompt_n": 9,
+                            "prompt_ms": 12.5,
+                            "predicted_n": 4,
+                            "predicted_ms": 20.0,
+                        }
+                    }
+                }
+
+        assert agent._extract_llamacpp_timings(DumpOnly()) == {
+            "prompt_n": 9,
+            "prompt_ms": 12.5,
+            "predicted_n": 4,
+            "predicted_ms": 20.0,
+        }
+
+
 # ===================================================================
 # Group 1: Pure Functions
 # ===================================================================
@@ -2209,6 +2293,25 @@ class TestRunConversation:
             result = agent.run_conversation("hello")
         assert result["final_response"] == "Final answer"
         assert result["completed"] is True
+
+    def test_stop_finish_reason_surfaces_llamacpp_timings(self, agent):
+        self._setup_agent(agent)
+        resp = _mock_response(content="Final answer", finish_reason="stop")
+        resp.timings = {
+            "prompt_n": 12,
+            "prompt_ms": 34.5,
+            "predicted_n": 7,
+            "predicted_ms": 89.0,
+        }
+        agent.client.chat.completions.create.return_value = resp
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("hello")
+
+        assert result["timings"] == resp.timings
 
     def test_tool_calls_then_stop(self, agent):
         self._setup_agent(agent)

@@ -77,7 +77,7 @@ _KNOWN_DELIVERY_PLATFORMS = frozenset({
     "telegram", "discord", "slack", "whatsapp", "signal",
     "matrix", "mattermost", "homeassistant", "dingtalk", "feishu",
     "wecom", "wecom_callback", "weixin", "sms", "email", "webhook", "bluebubbles",
-    "qqbot", "yuanbao",
+    "qqbot", "webui", "yuanbao",
 })
 
 # Platforms that support a configured cron/notification home target, mapped to
@@ -87,6 +87,7 @@ _HOME_TARGET_ENV_VARS = {
     "telegram": "TELEGRAM_HOME_CHANNEL",
     "discord": "DISCORD_HOME_CHANNEL",
     "slack": "SLACK_HOME_CHANNEL",
+    "webui": "WEBCHAT_HOME_CHANNEL",
     "signal": "SIGNAL_HOME_CHANNEL",
     "mattermost": "MATTERMOST_HOME_CHANNEL",
     "sms": "SMS_HOME_CHANNEL",
@@ -410,15 +411,26 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
 
         # Built-in names resolve to their enum member; plugin platform names
         # create dynamic members via Platform._missing_().
+        platform_key = platform_name.lower()
+        if platform_key in {"webui", "webchat"}:
+            platform = Platform.WEBCHAT
+        else:
+            try:
+                platform = Platform(platform_key)
+            except (ValueError, KeyError):
+                msg = f"unknown platform '{platform_name}'"
+                logger.warning("Job '%s': %s", job["id"], msg)
+                delivery_errors.append(msg)
+                continue
+
         try:
-            platform = Platform(platform_name.lower())
-        except (ValueError, KeyError):
+            pconfig = config.platforms.get(platform)
+        except Exception:
             msg = f"unknown platform '{platform_name}'"
             logger.warning("Job '%s': %s", job["id"], msg)
             delivery_errors.append(msg)
             continue
 
-        pconfig = config.platforms.get(platform)
         if not pconfig or not pconfig.enabled:
             msg = f"platform '{platform_name}' not configured/enabled"
             logger.warning("Job '%s': %s", job["id"], msg)

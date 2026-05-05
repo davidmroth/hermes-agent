@@ -70,6 +70,7 @@ class TestResolveDeliveryTarget:
             ("matrix", "MATRIX_HOME_ROOM", "!bot-room:example.org"),
             ("signal", "SIGNAL_HOME_CHANNEL", "+15551234567"),
             ("mattermost", "MATTERMOST_HOME_CHANNEL", "team-town-square"),
+            ("webui", "WEBCHAT_HOME_CHANNEL", "conv-home"),
             ("sms", "SMS_HOME_CHANNEL", "+15557654321"),
             ("email", "EMAIL_HOME_ADDRESS", "home@example.com"),
             ("dingtalk", "DINGTALK_HOME_CHANNEL", "cidNNN"),
@@ -88,6 +89,7 @@ class TestResolveDeliveryTarget:
             "TELEGRAM_HOME_CHANNEL",
             "DISCORD_HOME_CHANNEL",
             "SLACK_HOME_CHANNEL",
+            "WEBCHAT_HOME_CHANNEL",
             "SIGNAL_HOME_CHANNEL",
             "MATTERMOST_HOME_CHANNEL",
             "SMS_HOME_CHANNEL",
@@ -316,6 +318,29 @@ class TestResolveDeliveryTarget:
         from cron.scheduler import _resolve_delivery_targets
 
         assert _resolve_delivery_targets({"deliver": []}) == []
+
+    def test_deliver_result_maps_webui_alias_to_webchat_platform(self):
+        from gateway.config import Platform
+
+        pconfig = MagicMock()
+        pconfig.enabled = True
+        mock_cfg = MagicMock()
+        mock_cfg.platforms = {Platform.WEBCHAT: pconfig}
+
+        with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
+             patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock, \
+             patch("cron.scheduler.load_config", return_value={"cron": {"wrap_response": False}}), \
+             patch.dict(os.environ, {"WEBCHAT_HOME_CHANNEL": "conv-home"}, clear=False):
+            job = {
+                "id": "webui-job",
+                "deliver": "webui",
+            }
+
+            _deliver_result(job, "Output.")
+
+        send_mock.assert_called_once()
+        assert send_mock.call_args.args[0] == Platform.WEBCHAT
+        assert send_mock.call_args.args[2] == "conv-home"
 
 
 class TestDeliverResultWrapping:

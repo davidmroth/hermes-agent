@@ -2,16 +2,33 @@
 
 This file records the custom integration work that has landed in this branch, plus the pieces that were explored but intentionally not shipped. Keep it updated whenever private diff slices are merged so the next integration task starts from facts instead of archaeology.
 
+## Recently Completed Follow-Up Slices
+
+The selected follow-up set from `v2026.4.23.diff` is now landed in this branch:
+
+- WebChat helper tools for downloadable files and previewable HTML
+- WebChat delivery plumbing outside the base adapter
+- WebChat runner context reconciliation and status-buffering behavior
+- llama.cpp timings capture and propagation
+- Dashboard/plugin follow-up work from the diff
+
+These were selected together because they complete the WebChat delivery path, unblock the HTML fallback briefing skill, surface timings in the browser UI, and finish the remaining dashboard-facing diff slice that was left behind after the first pass.
+
+One follow-up detail matters for future merges: the first timing landing was not the whole fix. We initially landed llama.cpp timing extraction and preview reconciliation, but ordinary non-previewed WebChat replies still dropped timings until a later send-order fix in `gateway/platforms/base.py`. That post-landing correction is part of the current branch state and is documented below so the next integration does not stop at the same false milestone.
+
 ## Current Branch Snapshot
 
 | Area | Status | Notes |
 | --- | --- | --- |
 | WebChat gateway platform | Landed | Reverse-polling adapter, env wiring, trusted auth path, default toolset |
 | Renderer-backed briefings | Landed | `create_briefing`, config wiring, ACP/toolset registration, prompt/skill support |
-| Briefing HTML fallback skill | Partial | Skill metadata landed, but it depends on `send_html_to_webchat`, which is still missing |
+| Briefing HTML fallback skill | Landed | `send_html_to_webchat` now exists, so the fallback skill is actionable instead of placeholder-only |
 | NeuTTS Air provider | Landed | Runtime provider support plus setup, status, and schema surfaces |
 | Gateway media and diagnostics groundwork | Landed | Broader local-file extraction and structured exception logging |
-| Docker sidecar override | Not landed | Sidecar source trees were absent in this branch when the integration was done |
+| WebChat helper tools and delivery surfaces | Landed | File/HTML helpers, cron `webui` alias, platform detection, and dashboard cron wiring |
+| WebChat runner context and timings | Landed | Context reconciliation, WebChat system-status metadata, preview timing reconciliation, llama.cpp timing propagation, and the post-landing non-previewed send-order fix |
+| Dashboard plugin follow-up | Landed | Theme-gated Strike Freedom slots plus the bundled Task Management dashboard plugin/theme |
+| Docker sidecar override | Landed | `docker-compose.override.yml` and the `.services/NeuTTSTTS` and `.services/briefing-service` trees now exist in this branch |
 
 ## 1. WebChat Platform
 
@@ -261,13 +278,13 @@ Default renderer base URL behavior:
 
 ### Important implementation details
 
-#### The primary skill is real; the fallback skill is only partially usable today
+#### The primary skill is real; the fallback skill is now usable end to end
 
 `skills/research/rendered-briefing/SKILL.md` is the primary path when `create_briefing` is in the active tool list.
 
-`skills/research/briefing-html-fallback/SKILL.md` also landed, but it requires both `write_file` and `send_html_to_webchat`.
+`skills/research/briefing-html-fallback/SKILL.md` also landed, and it now has the delivery helper it depended on.
 
-`send_html_to_webchat` is not implemented in this branch yet. That means the fallback skill metadata is preserved for future work, but the actual HTML-delivery path is still blocked until that helper tool exists.
+The fallback path depends on both `write_file` and `send_html_to_webchat`, and both are now available in this branch.
 
 #### The tool is meant to be called in the same turn as the research synthesis
 
@@ -317,11 +334,11 @@ Default base URL behavior:
 
 If you want cloned voice output, both `tts.neutts-air.ref_audio` and `tts.neutts-air.ref_text` must be set. Supplying only one is treated as invalid configuration.
 
-#### The provider is integrated, but the sidecar is not shipped here
+#### The provider wiring and sidecar override now ship together here
 
-The Hermes-side provider wiring landed. The sidecar service definition did not.
+The Hermes-side provider wiring landed first, and this branch now also carries the checked-in sidecar override and supporting service trees.
 
-There is no checked-in Docker override in this branch that starts a NeuTTS Air container. If you want to use this provider, you still need to run the service yourself or add the sidecar sources and compose wiring separately.
+If NeuTTS Air is not available at runtime, debug the live Docker deployment first before assuming the provider wiring regressed.
 
 ## 4. Shared Gateway Groundwork
 
@@ -354,7 +371,118 @@ These changes are easy to overlook because they are not new top-level features, 
 - WebChat and other platforms rely on the broader file extraction behavior for attachment delivery
 - Gateway failures are much easier to debug because the shared exception path now emits structured diagnostics instead of low-context log noise
 
-## 5. Focused Validation Commands
+## 5. WebChat Follow-Through and Dashboard Plugins
+
+### What landed
+
+The second integration pass finished the remaining WebChat, timing, and dashboard slices that were still open after the first landing:
+
+- `send_file_to_webchat` and `send_html_to_webchat` now exist as first-class helper tools
+- outbound WebChat delivery accepts uploaded files and previewable HTML through the shared send-message path
+- cron delivery now recognizes the `webui` alias and `WEBCHAT_HOME_CHANNEL`
+- CLI/platform detection and dashboard cron UI now expose WebChat as a delivery target
+- the WebChat adapter can reconcile browser conversation state from `contextUrl` and `contextVersion`
+- WebChat system notifications now carry explicit system-role metadata for status, approval, and deferred background-review messages
+- failed WebChat runs preserve buffered retry details in the final visible error text
+- previewed WebChat replies can be reconciled back onto the existing browser message using the preview `message_id`
+- `run_agent.py` now extracts llama.cpp timing payloads and returns them with the final agent result
+- the Strike Freedom cockpit slots only render when the matching theme is active
+- the missing Task Management dashboard plugin and paired theme are now bundled in-tree
+
+### Files added or changed
+
+- `tools/send_message_tool.py`
+- `tools/webchat_file_tool.py`
+- `tools/webchat_html_tool.py`
+- `toolsets.py`
+- `tools/delegate_tool.py`
+- `cron/scheduler.py`
+- `hermes_cli/platforms.py`
+- `hermes_cli/tools_config.py`
+- `web/src/pages/CronPage.tsx`
+- `web/src/i18n/en.ts`
+- `web/src/i18n/zh.ts`
+- `web/src/i18n/types.ts`
+- `gateway/platforms/webchat.py`
+- `gateway/run.py`
+- `run_agent.py`
+- `plugins/strike-freedom-cockpit/dashboard/dist/index.js`
+- `plugins/task-management-dashboard/README.md`
+- `plugins/task-management-dashboard/dashboard/dist/index.js`
+- `plugins/task-management-dashboard/dashboard/manifest.json`
+- `plugins/task-management-dashboard/theme/task-management.yaml`
+- `tests/tools/test_send_message_tool.py`
+- `tests/tools/test_webchat_file_tool.py`
+- `tests/tools/test_webchat_html_tool.py`
+- `tests/cron/test_scheduler.py`
+- `tests/hermes_cli/test_tools_config.py`
+- `tests/gateway/test_webchat.py`
+- `tests/gateway/test_run_progress_topics.py`
+- `tests/run_agent/test_run_agent.py`
+
+### Important implementation details
+
+#### WebChat context is now browser-authoritative when the page provides a fresh context snapshot
+
+When an inbound WebChat event includes a `contextUrl`, Hermes fetches the browser-side conversation graph and rewrites the local transcript only when the fetched marker is fresh enough to match the event's `contextVersion`.
+
+That keeps Hermes from replaying stale local history after the user has edited or branched the conversation in the Web UI.
+
+#### Timings are extracted once per turn and attached to the final visible WebChat reply
+
+`run_agent.py` now captures llama.cpp-style timings payloads from either the top-level response or usage metadata and returns them in the turn result.
+
+`gateway/run.py` then uses those timings to reconcile a previewed WebChat assistant message back onto the original browser message record instead of sending a duplicate final answer.
+
+#### The normal non-previewed WebChat reply path needed a second fix after the first timing landing
+
+The first timing pass looked complete because two things were already true:
+
+- `run_agent.py` extracted llama.cpp-style timings from top-level response fields and native usage fields
+- previewed WebChat replies could reconcile timings back onto the preview message
+
+But ordinary non-previewed WebChat replies were still wrong.
+
+The root cause was ordering inside `gateway/platforms/base.py::_process_message_background()`:
+
+- the adapter built `_thread_metadata` before awaiting `self._message_handler(event)`
+- `gateway/run.py::_handle_message_with_agent()` only sets `event._hermes_timings` after the agent finishes
+- result: the normal final send path snapshotted metadata too early, so `gateway/platforms/webchat.py` never received top-level `timings` on ordinary replies even though extraction already worked
+
+This was easy to miss because a test that pre-populates `event._hermes_timings` before `_process_message_background()` runs will pass even though the real runtime ordering is still broken.
+
+The actual fix was:
+
+- keep typing metadata thread-only
+- rebuild delivery metadata after the handler returns
+- use that rebuilt metadata for the text send and all media sends so WebChat sees `metadata["timings"]` only after the handler has attached `event._hermes_timings`
+
+The focused Hermes-side regression for this is:
+
+- `tests/gateway/test_webchat.py::test_process_message_background_propagates_event_timings_to_webchat_send`
+
+That regression now mutates `event._hermes_timings` inside the mocked handler so it matches production ordering instead of the easier but misleading pre-seeded event setup.
+
+There is also a companion receiver-side regression in the sibling WebUI repo:
+
+- `service/frontend/src/lib/server/maintenance.test.js`
+
+That test protects the maintenance page model so stored assistant timings remain visible in the `Recent assistant timings` section.
+
+The live smoke test is the WebUI maintenance page:
+
+- `Recent Hermes delivery traces` should show new timing-bearing sends as `webchat_adapter+timings`
+- `Recent assistant timings` should advance with a fresh reply row that has timings
+
+If new traces still show `webchat_adapter` without the `+timings` suffix, the sender is still not posting a top-level `timings` payload, regardless of whether extraction tests pass.
+
+#### Dashboard slot plugins must gate themselves on the active theme
+
+The slot system is global. Without theme gating, a slot-only plugin can bleed its sidebar or footer chrome into unrelated themes.
+
+The Strike Freedom cockpit plugin now checks the active theme name and cockpit layout variant before rendering any slot content. The Task Management plugin follows the same pattern.
+
+## 6. Focused Validation Commands
 
 Use the repo wrapper, not raw `pytest`:
 
@@ -380,7 +508,29 @@ The focused validation commands used for the landed slices were:
 ./scripts/run_tests.sh tests/agent/test_prompt_builder.py tests/gateway/test_platform_base.py tests/gateway/test_extract_local_files.py tests/gateway/test_error_debug.py -q
 ```
 
-## 6. Deployment Notes
+```bash
+./scripts/run_tests.sh tests/tools/test_send_message_tool.py tests/tools/test_webchat_file_tool.py tests/tools/test_webchat_html_tool.py -q
+```
+
+```bash
+./scripts/run_tests.sh tests/cron/test_scheduler.py tests/hermes_cli/test_tools_config.py -q
+```
+
+```bash
+./scripts/run_tests.sh tests/gateway/test_webchat.py tests/gateway/test_run_progress_topics.py::test_run_agent_previewed_webchat_response_reconciles_timings tests/gateway/test_run_progress_topics.py::test_webchat_background_review_notification_is_system_metadata tests/run_agent/test_run_agent.py::TestLlamaCppTimingsExtraction tests/run_agent/test_run_agent.py::TestRunConversation::test_stop_finish_reason_surfaces_llamacpp_timings -q
+```
+
+```bash
+./scripts/run_tests.sh tests/gateway/test_webchat.py::test_process_message_background_propagates_event_timings_to_webchat_send -q
+```
+
+Companion receiver-side regression in the sibling WebUI repo:
+
+```bash
+docker compose run --rm webui node --import tsx --test src/lib/server/maintenance.test.js
+```
+
+## 7. Deployment Notes
 
 After runtime code changes land, the running Docker gateway still needs to be rebuilt or restarted.
 
@@ -388,22 +538,23 @@ If WebChat code exists in the repo but the live container is still acting like i
 
 The same rule applies to briefing and TTS integrations: config and code can be correct in git while the running container is still on an older image.
 
-## 7. Still Missing or Intentionally Deferred
+## 8. Still Missing or Intentionally Deferred
 
-These items are still not landed in this branch and should not be assumed to exist:
+No selected WebChat, briefing, timing, or dashboard items from this integration round remain pending in this branch.
 
-- `send_file_to_webchat`
-- `send_html_to_webchat`
-- A checked-in Docker sidecar override for NeuTTS Air and the briefing renderer
+The only safe assumption for future merge work is that this ledger, not the original diff, is the current source of truth.
 
-The Docker override was intentionally skipped because the upstream compose fragment referenced sidecar source trees that were not present here at integration time:
+If a later upstream diff touches the same surfaces again, re-check the current branch before replaying anything into:
 
-- `.services/NeuTTSTTS`
-- `.services/briefing-service`
+- `gateway/platforms/webchat.py`
+- `gateway/run.py`
+- `run_agent.py`
+- `toolsets.py`
+- `cron/scheduler.py`
+- `plugins/strike-freedom-cockpit/`
+- `plugins/task-management-dashboard/`
 
-If those source trees are added later, create the override against the current branch's compose layout instead of replaying the old diff blindly.
-
-## 8. Next-Round Checkpoints
+## 9. Next-Round Checkpoints
 
 If this custom work is extended again, start here:
 
@@ -411,6 +562,9 @@ If this custom work is extended again, start here:
 2. Confirm `Platform.WEBCHAT` still resolves as connected only when both URL and token exist.
 3. Confirm `hermes-webchat` still exists and is included by `hermes-gateway`.
 4. Confirm the renderer token and base URL contract still matches `tools/briefing_tool.py`.
-5. Remember that the briefing fallback skill is blocked until `send_html_to_webchat` exists.
-6. Remember that NeuTTS Air support in Hermes does not imply the sidecar is provisioned.
-7. Rebuild the live Docker gateway before debugging runtime symptoms.
+5. Confirm `send_file_to_webchat` and `send_html_to_webchat` are still registered in `toolsets.py` and still blocked from delegate-tool child runs.
+6. Confirm WebChat preview reconciliation still attaches timings onto the previewed browser message instead of sending a duplicate final answer.
+7. Confirm the slot-only dashboard plugins still gate themselves on the active theme and cockpit layout.
+8. Rebuild the live Docker gateway before debugging runtime symptoms.
+9. Confirm the normal non-previewed WebChat send path still rebuilds delivery metadata after `self._message_handler(event)` returns. If metadata is constructed before the handler runs, timings will disappear again even though extraction and preview reconciliation still pass.
+10. Use the WebUI `/maintenance` page as the live contract check. Fresh timing-bearing replies should create `webchat_adapter+timings` traces and advance the `Recent assistant timings` section. If not, keep debugging the sender path instead of the maintenance page.
