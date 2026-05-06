@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 # become visible instead of piling up as NULL session titles.
 FailureCallback = Callable[[str, BaseException], None]
 
+_attempted_sessions: set[str] = set()
+_attempted_sessions_lock = threading.Lock()
+
 _TITLE_PROMPT = (
     "Generate a short, descriptive title (3-7 words) for a conversation that starts with the "
     "following exchange. The title should capture the main topic or intent. "
@@ -148,6 +151,14 @@ def maybe_auto_title(
     user_msg_count = sum(1 for m in (conversation_history or []) if m.get("role") == "user")
     if user_msg_count > 2:
         return
+
+    # Only attempt auto-titling once per session per process. This avoids
+    # repeated auxiliary timeout warnings on follow-up turns when the first
+    # background title request already failed or is still in flight.
+    with _attempted_sessions_lock:
+        if session_id in _attempted_sessions:
+            return
+        _attempted_sessions.add(session_id)
 
     thread = threading.Thread(
         target=auto_title_session,

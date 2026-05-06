@@ -34,7 +34,7 @@ Do not say you will render the briefing later. When the briefing structure is re
 5. Map evidence cleanly.
    Put important numeric facts into `metrics`. Add `citations` that point to real `source_id` entries from the top-level `sources` list.
 6. Render with `create_briefing`.
-   Surface the returned `job_id`, validation warnings, and the WebUI preview path `/briefings/<job_id>` when the conversation is happening in WebUI.
+   Surface the returned `job_id`, validation warnings, and the WebUI preview path `/briefings/<job_id>` when the conversation is happening in WebUI. Always present the preview as the relative path `/briefings/<job_id>`; do not rewrite it to `localhost`, `127.0.0.1`, or any other absolute URL.
 
 ## Payload Guidance
 
@@ -55,7 +55,8 @@ Do not say you will render the briefing later. When the briefing structure is re
 4. Reply with:
    - what the briefing covers,
    - any caveats or validation warnings,
-   - the preview path if available.
+   - the exact preview path `/briefings/<job_id>` if available.
+5. Do not substitute a host-prefixed URL such as `http://localhost:3001/briefings/<job_id>`.
 
 ## Quality Bar
 
