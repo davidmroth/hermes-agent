@@ -305,7 +305,8 @@ def _build_summary(result: dict[str, Any], base_url: str) -> dict[str, Any]:
         "source_count": len(result.get("sources") or []),
         "validation": result.get("validation") or {"valid": True, "warnings": [], "errors": []},
         "asset_urls": asset_urls,
-        "webui_preview_path": f"/briefings/{job_id}",
+        "webui_preview_path": f"/briefings/{job_id}/player",
+        "webui_standalone_html_path": f"/briefings/{job_id}",
     }
     manifest_path = result.get("manifest_path")
     audio_path = result.get("audio_path")
@@ -391,7 +392,8 @@ def create_briefing_tool(args: dict[str, Any], **_kw) -> str:
                 "renderer_base_url": base_url,
                 "status_url": status_url,
                 "result_url": result_url,
-                "webui_preview_path": f"/briefings/{job_id}",
+                "webui_preview_path": f"/briefings/{job_id}/player",
+                "webui_standalone_html_path": f"/briefings/{job_id}",
             }
 
             if not wait_for_completion:

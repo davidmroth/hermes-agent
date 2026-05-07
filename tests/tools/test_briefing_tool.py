@@ -122,7 +122,8 @@ def test_create_briefing_waits_for_completion_and_returns_preview(monkeypatch):
     assert result["success"] is True
     assert result["status"] == "completed"
     assert result["job_id"] == "job-123"
-    assert result["result"]["webui_preview_path"] == "/briefings/job-123"
+    assert result["result"]["webui_preview_path"] == "/briefings/job-123/player"
+    assert result["result"]["webui_standalone_html_path"] == "/briefings/job-123"
     assert result["result"]["audio_url"] == "http://renderer.test/v1/briefings/job-123/assets/narration.wav"
     assert captured_request["headers"]["authorization"] == "Bearer token-123"
     assert captured_request["json"]["briefing_id"].startswith("shipping-risk-briefing-")

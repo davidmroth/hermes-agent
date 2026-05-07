@@ -15,6 +15,15 @@ metadata:
 
 # Rendered Research Briefings
 
+Create a rendered briefing/explainer about the the <user's topic>.
+
+Research first, use current sources, and help me understand what this is, how it works, and expected impact (if any) based on your DEEP and exhaustive research. Also, try to find the hidden insight or story within the noise.
+
+Use spoken narration, metrics, and citations.
+Separate confirmed facts from uncertainty and recommendations.
+
+When the structure is ready, render the briefing and return the preview link.
+
 Use this skill when the user wants a polished briefing rather than a plain-text answer: a structured narrative with sections, sources, citations, and renderer output that can be previewed in WebUI.
 
 ## Core Rule
@@ -34,7 +43,7 @@ Do not say you will render the briefing later. When the briefing structure is re
 5. Map evidence cleanly.
    Put important numeric facts into `metrics`. Add `citations` that point to real `source_id` entries from the top-level `sources` list.
 6. Render with `create_briefing`.
-   Surface the returned `job_id`, validation warnings, and the WebUI preview path `/briefings/<job_id>` when the conversation is happening in WebUI. Always present the preview as the relative path `/briefings/<job_id>`; do not rewrite it to `localhost`, `127.0.0.1`, or any other absolute URL.
+   Surface the returned `job_id`, validation warnings, and the WebUI standalone HTML path `/briefings/<job_id>` when the conversation is happening in WebUI. Use `/briefings/<job_id>/player` only when you specifically need the interactive player route. Do not rewrite either path to `localhost`, `127.0.0.1`, or any other absolute URL.
 
 ## Payload Guidance
 
@@ -55,7 +64,8 @@ Do not say you will render the briefing later. When the briefing structure is re
 4. Reply with:
    - what the briefing covers,
    - any caveats or validation warnings,
-   - the exact preview path `/briefings/<job_id>` if available.
+   - the exact HTML path `/briefings/<job_id>` if available,
+   - the player path `/briefings/<job_id>/player` only if you also need the interactive player route.
 5. Do not substitute a host-prefixed URL such as `http://localhost:3001/briefings/<job_id>`.
 
 ## Quality Bar
