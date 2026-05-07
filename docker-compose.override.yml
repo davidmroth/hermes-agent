@@ -189,6 +189,32 @@ services:
         max-file: "3"
         max-size: "10m"
 
+  # ---------------------------------------------------------------------------
+  # Kokoro TTS — CPU ONNX sidecar with a NeuTTS-compatible /tts endpoint
+  # Host endpoint: http://127.0.0.1:9100/tts
+  # Internal endpoint: http://kokoro-tts:8000/tts
+  # Model/cache files persist in .services/kokoro-tts/cache.
+  # ---------------------------------------------------------------------------
+  kokoro-tts:
+    build:
+      context: .
+      dockerfile: .services/kokoro-tts/Dockerfile
+    restart: unless-stopped
+    environment:
+      - KOKORO_MODEL_DIR=/models
+      - KOKORO_VOICE=${KOKORO_TTS_VOICE:-af_sky}
+      - KOKORO_LANG=${KOKORO_TTS_LANG:-en-us}
+      - KOKORO_SPEED=${KOKORO_TTS_SPEED:-1.0}
+    ports:
+      - "9100:8000"
+    volumes:
+      - .data/kokoro-tts/cache:/models
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
 
   briefing:
     build:
@@ -203,7 +229,9 @@ services:
       BRIEFING_RENDERER_DATA_DIR: /data
       BRIEFING_RENDERER_SERVICE_TOKEN: ${BRIEFING_RENDERER_SERVICE_TOKEN:-}
       BRIEFING_RENDERER_MAX_CONCURRENT_JOBS: 1
-      BRIEFING_RENDERER_NARRATION_MODE: fast
+      BRIEFING_RENDERER_NARRATION_MODE: ${BRIEFING_RENDERER_NARRATION_MODE:-full}
+      BRIEFING_RENDERER_TTS_PROVIDER: ${BRIEFING_RENDERER_TTS_PROVIDER:-kokoro-tts}
+      BRIEFING_RENDERER_TTS_BASE_URL: ${BRIEFING_RENDERER_TTS_BASE_URL:-http://kokoro-tts:8000}
     volumes:
       - .services/briefing-service:/app
       - .data/briefing:/data
