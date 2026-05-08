@@ -244,10 +244,18 @@ def test_sync_slash_commands_posts_gateway_catalog():
     posted = {}
 
     async def _post(url, json, headers):
+        from gateway.platforms.webchat import _command_catalog_hash
+
         posted["url"] = url
         posted["json"] = json
         posted["headers"] = headers
-        return _Response(payload={"ok": True})
+        return _Response(
+            payload={
+                "ok": True,
+                "acceptedCount": len(json["commands"]),
+                "catalogHash": _command_catalog_hash(json["commands"]),
+            }
+        )
 
     adapter._client = Mock()
     adapter._client.post = AsyncMock(side_effect=_post)
@@ -263,6 +271,17 @@ def test_sync_slash_commands_posts_gateway_catalog():
     assert new_entry["requiresConfirmation"] is True
     assert new_entry["aliases"] == ["/reset"]
     assert "/clear" not in {entry["command"] for entry in posted["json"]["commands"]}
+
+
+def test_sync_slash_commands_rejects_mismatched_acknowledgement():
+    adapter = _build_adapter()
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(
+        return_value=_Response(payload={"ok": True, "acceptedCount": 1, "catalogHash": "wrong"})
+    )
+
+    with pytest.raises(RuntimeError, match="acknowledgement mismatch"):
+        asyncio.run(adapter._sync_slash_commands())
 
 
 def test_connect_syncs_slash_commands_after_health_check():
@@ -285,6 +304,26 @@ def test_connect_syncs_slash_commands_after_health_check():
 
     assert connected is True
     mock_sync.assert_awaited_once()
+
+
+def test_connect_returns_false_when_slash_command_sync_cannot_be_verified():
+    adapter = _build_adapter()
+    fake_client = Mock()
+    fake_client.get = AsyncMock(return_value=_Response(payload={"ok": True}))
+    fake_client.aclose = AsyncMock()
+
+    with (
+        patch("gateway.platforms.webchat.httpx.AsyncClient", return_value=fake_client),
+        patch.object(
+            adapter,
+            "_sync_slash_commands_with_retry",
+            AsyncMock(side_effect=RuntimeError("ack failed")),
+        ),
+    ):
+        connected = asyncio.run(adapter.connect())
+
+    assert connected is False
+    fake_client.aclose.assert_awaited_once()
 
 
 def test_load_history_for_event_ignores_stale_context_version():

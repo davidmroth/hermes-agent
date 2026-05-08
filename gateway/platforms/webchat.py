@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import json
 import logging
 import mimetypes
 import os
@@ -43,6 +45,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "http://127.0.0.1:3000"
 DEFAULT_POLL_INTERVAL = 1.0
 DEFAULT_TIMEOUT_SECONDS = 30.0
+DEFAULT_COMMAND_SYNC_RETRIES = 4
+DEFAULT_COMMAND_SYNC_BACKOFF_SECONDS = 1.0
+DEFAULT_COMMAND_SYNC_MAX_BACKOFF_SECONDS = 8.0
 
 
 def check_webchat_requirements() -> bool:
@@ -194,6 +199,40 @@ def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]
     return entry
 
 
+def _serialize_command_catalog(commands: list[Dict[str, Any]]) -> str:
+    normalized: list[Dict[str, Any]] = []
+    for entry in commands:
+        normalized_entry: Dict[str, Any] = {
+            "command": str(entry.get("command") or "").strip(),
+            "description": str(entry.get("description") or "Hermes command").strip() or "Hermes command",
+        }
+        args_hint = str(entry.get("argsHint") or "").strip()
+        category = str(entry.get("category") or "").strip()
+        aliases = entry.get("aliases")
+        requires_confirmation = entry.get("requiresConfirmation") is True
+
+        if args_hint:
+            normalized_entry["argsHint"] = args_hint
+        if category:
+            normalized_entry["category"] = category
+        if isinstance(aliases, list):
+            normalized_aliases = [
+                str(alias).strip() for alias in aliases if str(alias).strip()
+            ]
+            if normalized_aliases:
+                normalized_entry["aliases"] = normalized_aliases
+        if requires_confirmation:
+            normalized_entry["requiresConfirmation"] = True
+
+        normalized.append(normalized_entry)
+
+    return json.dumps(normalized, separators=(",", ":"), ensure_ascii=False)
+
+
+def _command_catalog_hash(commands: list[Dict[str, Any]]) -> str:
+    return hashlib.sha256(_serialize_command_catalog(commands).encode("utf-8")).hexdigest()
+
+
 def build_webchat_context_transcript(
     context_payload: Dict[str, Any],
     *,
@@ -261,6 +300,24 @@ class WebChatAdapter(BasePlatformAdapter):
         self._timeout_seconds = float(
             extra.get("timeout_seconds")
             or os.getenv("WEBCHAT_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))
+        )
+        self._command_sync_retries = int(
+            extra.get("command_sync_retries")
+            or os.getenv("WEBCHAT_COMMAND_SYNC_RETRIES", str(DEFAULT_COMMAND_SYNC_RETRIES))
+        )
+        self._command_sync_backoff_seconds = float(
+            extra.get("command_sync_backoff_seconds")
+            or os.getenv(
+                "WEBCHAT_COMMAND_SYNC_BACKOFF_SECONDS",
+                str(DEFAULT_COMMAND_SYNC_BACKOFF_SECONDS),
+            )
+        )
+        self._command_sync_max_backoff_seconds = float(
+            extra.get("command_sync_max_backoff_seconds")
+            or os.getenv(
+                "WEBCHAT_COMMAND_SYNC_MAX_BACKOFF_SECONDS",
+                str(DEFAULT_COMMAND_SYNC_MAX_BACKOFF_SECONDS),
+            )
         )
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
@@ -350,9 +407,13 @@ class WebChatAdapter(BasePlatformAdapter):
             return False
 
         try:
-            await self._sync_slash_commands()
+            await self._sync_slash_commands_with_retry()
         except Exception as exc:
-            logger.warning("[%s] Failed to sync slash commands to webchat: %s", self.name, exc)
+            logger.error("[%s] Failed to verify slash command sync to webchat: %s", self.name, exc)
+            if self._client is not None:
+                await self._client.aclose()
+                self._client = None
+            return False
 
         self._mark_connected()
         self._poll_task = asyncio.create_task(self._poll_loop())
@@ -361,18 +422,57 @@ class WebChatAdapter(BasePlatformAdapter):
         logger.info("[%s] Connected to %s", self.name, self._base_url)
         return True
 
+    async def _sync_slash_commands_with_retry(self) -> None:
+        attempts = max(1, self._command_sync_retries)
+        for attempt in range(1, attempts + 1):
+            try:
+                await self._sync_slash_commands()
+                return
+            except Exception:
+                if attempt >= attempts:
+                    raise
+                backoff_seconds = min(
+                    self._command_sync_backoff_seconds * (2 ** (attempt - 1)),
+                    self._command_sync_max_backoff_seconds,
+                )
+                logger.warning(
+                    "[%s] Slash command sync verification failed on attempt %s/%s; retrying in %.1fs",
+                    self.name,
+                    attempt,
+                    attempts,
+                    backoff_seconds,
+                )
+                await asyncio.sleep(backoff_seconds)
+
     async def _sync_slash_commands(self) -> None:
         if self._client is None:
             return
 
         from hermes_cli.commands import gateway_command_catalog
 
+        commands = gateway_command_catalog()
+        expected_count = len(commands)
+        expected_hash = _command_catalog_hash(commands)
+
         response = await self._client.post(
             self._commands_url(),
-            json={"commands": gateway_command_catalog()},
+            json={"commands": commands},
             headers=self._headers(),
         )
         response.raise_for_status()
+
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            raise RuntimeError("webchat did not acknowledge slash command sync")
+
+        accepted_count = payload.get("acceptedCount")
+        catalog_hash = payload.get("catalogHash")
+        if accepted_count != expected_count or catalog_hash != expected_hash:
+            raise RuntimeError(
+                "webchat slash command acknowledgement mismatch "
+                f"(expected count={expected_count}, hash={expected_hash}; "
+                f"received count={accepted_count}, hash={catalog_hash})"
+            )
 
     async def disconnect(self) -> None:
         self._mark_disconnected()
