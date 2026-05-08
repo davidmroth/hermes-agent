@@ -164,32 +164,6 @@ services:
         max-size: "10m"
 
   # ---------------------------------------------------------------------------
-  # NeuTTS Air — Minimal local TTS sidecar
-  # Host endpoint: http://127.0.0.1:8000/tts
-  # Internal endpoint: http://neutts-air:8000/tts
-  # Model/cache files persist in .services/NeuTTSTTS/cache.
-  # ---------------------------------------------------------------------------
-  neutts-air:
-    build:
-      context: .
-      dockerfile: .services/NeuTTSTTS/Dockerfile
-    restart: unless-stopped
-    environment:
-      - HF_HOME=/root/.cache/huggingface
-      - NEUTTS_BACKBONE_REPO=neuphonic/neutts-air
-      - NEUTTS_BACKBONE_DEVICE=cpu
-      - NEUTTS_CODEC_DEVICE=cpu
-    ports:
-      - "9099:8000"
-    volumes:
-      - .services/NeuTTSTTS/cache:/root/.cache
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "3"
-        max-size: "10m"
-
-  # ---------------------------------------------------------------------------
   # Kokoro TTS — CPU ONNX sidecar with a NeuTTS-compatible /tts endpoint
   # Host endpoint: http://127.0.0.1:9100/tts
   # Internal endpoint: http://kokoro-tts:8000/tts
@@ -216,6 +190,12 @@ services:
         max-size: "10m"
 
 
+  # ---------------------------------------------------------------------------
+  # Briefing Renderer — Renders agent briefings to video with narration
+  # Exposes an API for rendering briefing JSON → MP4 video with TTS narration.
+  # Configured with environment variables for renderer behavior and TTS integration.
+  # Data persists in .data/briefing, including cached assets and rendered videos.
+  # ---------------------------------------------------------------------------
   briefing:
     build:
       context: .
