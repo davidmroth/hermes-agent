@@ -54,8 +54,15 @@ services:
   dashboard:
     volumes:
       - .data/hermes:/opt/data
+    command: ["dashboard", "--host", "0.0.0.0", "--insecure", "--no-open"]
     network_mode: !bridge
-
+    ports:
+      - "${DASHBOARD_PORT:-9119}:9119"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
   # ---------------------------------------------------------------------------
   # Camofox — Local anti-detection browser (Firefox/Camoufox)
   # Provides browser automation with C++ fingerprint spoofing.
