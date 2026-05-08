@@ -152,6 +152,14 @@ All of these are authenticated with:
 
 ### Important implementation details
 
+#### Slash command sync is push-only
+
+The WebUI does not poll Hermes for slash commands.
+
+Hermes pushes the current gateway-visible command catalog to `POST /api/internal/hermes/commands` during adapter connect, and the WebUI serves that last stored catalog from its own durable cache.
+
+If slash commands come back empty in the browser, debug the push path or the receiver-side cache persistence. Do not add a WebUI polling loop as a fallback.
+
 #### `conversationId` is the outbound routing key
 
 Use `conversationId` when posting replies back to the WebUI.
