@@ -77,6 +77,10 @@ def test_get_platform_tools_uses_default_when_platform_not_configured():
 def test_configurable_toolsets_include_messaging():
     assert any(ts_key == "messaging" for ts_key, _, _ in CONFIGURABLE_TOOLSETS)
 
+
+def test_configurable_toolsets_include_briefing():
+    assert any(ts_key == "briefing" for ts_key, _, _ in CONFIGURABLE_TOOLSETS)
+
 def test_get_platform_tools_default_telegram_includes_messaging():
     enabled = _get_platform_tools({}, "telegram")
 
@@ -600,6 +604,26 @@ class TestPlatformToolsetConsistency:
                 f"Platform {platform!r} in tools_config but missing from "
                 f"skills_config PLATFORMS"
             )
+
+
+def test_get_platform_tools_default_webchat_uses_fallback_toolset():
+    from hermes_cli.tools_config import _get_platform_tools
+
+    enabled = _get_platform_tools({}, "webchat")
+
+    assert "terminal" in enabled
+    assert "file" in enabled
+
+
+def test_get_enabled_platforms_includes_webchat(monkeypatch):
+    from hermes_cli.tools_config import _get_enabled_platforms
+
+    monkeypatch.setenv("WEBCHAT_SERVICE_TOKEN", "svc-token")
+    monkeypatch.setenv("WEBCHAT_URL", "http://webui:3000")
+
+    enabled = _get_enabled_platforms()
+
+    assert "webchat" in enabled
 
 
 def test_numeric_mcp_server_name_does_not_crash_sorted():

@@ -31,6 +31,8 @@ from typing import List, Dict, Any, Set, Optional
 _HERMES_CORE_TOOLS = [
     # Web
     "web_search", "web_extract",
+    # Briefing renderer
+    "create_briefing",
     # Terminal + process management
     "terminal", "process",
     # File manipulation
@@ -57,7 +59,7 @@ _HERMES_CORE_TOOLS = [
     # Cronjob management
     "cronjob",
     # Cross-platform messaging (gated on gateway running via check_fn)
-    "send_message",
+    "send_message", "send_file_to_webchat", "send_html_to_webchat",
     # Home Assistant smart home control (gated on HASS_TOKEN via check_fn)
     "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
     # Kanban multi-agent coordination — only in schema when the agent is
@@ -140,7 +142,7 @@ TOOLSETS = {
     
     "messaging": {
         "description": "Cross-platform messaging: send messages to Telegram, Discord, Slack, SMS, etc.",
-        "tools": ["send_message"],
+        "tools": ["send_message", "send_file_to_webchat", "send_html_to_webchat"],
         "includes": []
     },
     
@@ -165,6 +167,12 @@ TOOLSETS = {
     "tts": {
         "description": "Text-to-speech: convert text to audio with Edge TTS (free), ElevenLabs, OpenAI, or xAI",
         "tools": ["text_to_speech"],
+        "includes": []
+    },
+
+    "briefing": {
+        "description": "Structured multimedia briefing rendering via the briefing renderer service",
+        "tools": ["create_briefing"],
         "includes": []
     },
     
@@ -500,10 +508,16 @@ TOOLSETS = {
         "includes": []
     },
 
+    "hermes-webchat": {
+        "description": "Webchat toolset - browser chat surface with the default Hermes tool access",
+        "tools": _HERMES_CORE_TOOLS,
+        "includes": []
+    },
+
     "hermes-gateway": {
         "description": "Gateway toolset - union of all messaging platform tools",
         "tools": [],
-        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-bluebubbles", "hermes-homeassistant", "hermes-email", "hermes-sms", "hermes-mattermost", "hermes-matrix", "hermes-dingtalk", "hermes-feishu", "hermes-wecom", "hermes-wecom-callback", "hermes-weixin", "hermes-qqbot", "hermes-webhook", "hermes-yuanbao"]
+        "includes": ["hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-bluebubbles", "hermes-homeassistant", "hermes-email", "hermes-sms", "hermes-mattermost", "hermes-matrix", "hermes-dingtalk", "hermes-feishu", "hermes-wecom", "hermes-wecom-callback", "hermes-weixin", "hermes-qqbot", "hermes-webhook", "hermes-webchat", "hermes-yuanbao"]
     }
 }
 

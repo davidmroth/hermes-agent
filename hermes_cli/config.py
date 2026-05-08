@@ -579,6 +579,13 @@ DEFAULT_CONFIG = {
         },
     },
 
+    "briefing": {
+        "renderer_base_url": "",
+        "request_timeout_seconds": 20,
+        "poll_interval_seconds": 1.0,
+        "max_wait_seconds": 90,
+    },
+
     # Filesystem checkpoints — automatic snapshots before destructive file ops.
     # When enabled, the agent takes a snapshot of the working directory once
     # per conversation turn (on first write_file/patch call).  Use /rollback
@@ -867,9 +874,9 @@ DEFAULT_CONFIG = {
     # Each provider supports an optional `max_text_length:` override for the
     # per-request input-character cap. Omit it to use the provider's documented
     # limit (OpenAI 4096, xAI 15000, MiniMax 10000, ElevenLabs 5k-40k model-aware,
-    # Gemini 5000, Edge 5000, Mistral 4000, NeuTTS/KittenTTS 2000).
+    # Gemini 5000, Edge 5000, Mistral 4000, NeuTTS Air/NeuTTS/KittenTTS 2000).
     "tts": {
-        "provider": "edge",  # "edge" (free) | "elevenlabs" (premium) | "openai" | "xai" | "minimax" | "mistral" | "gemini" | "neutts" (local) | "kittentts" (local) | "piper" (local)
+        "provider": "edge",  # "edge" (free) | "elevenlabs" (premium) | "openai" | "xai" | "minimax" | "mistral" | "gemini" | "neutts-air" (sidecar) | "neutts" (local) | "kittentts" (local) | "piper" (local)
         "edge": {
             "voice": "en-US-AriaNeural",
             # Popular: AriaNeural, JennyNeural, AndrewNeural, BrianNeural, SoniaNeural
@@ -892,6 +899,12 @@ DEFAULT_CONFIG = {
         "mistral": {
             "model": "voxtral-mini-tts-2603",
             "voice_id": "c69964a6-ab8b-4f8a-9465-ec0925096ec8",  # Paul - Neutral
+        },
+        "neutts-air": {
+            "base_url": "http://neutts-air:8000" if _is_container() else "http://127.0.0.1:9099",
+            "ref_audio": "",  # Optional path to reference voice audio for cloning
+            "ref_text": "",   # Optional transcript string or path for reference audio
+            "timeout_seconds": 120,
         },
         "neutts": {
             "ref_audio": "",  # Path to reference voice audio (empty = bundled default)
@@ -1941,6 +1954,14 @@ OPTIONAL_ENV_VARS = {
         "prompt": "OpenAI API Key (for Whisper STT + TTS)",
         "url": "https://platform.openai.com/api-keys",
         "tools": ["voice_transcription", "openai_tts"],
+        "password": True,
+        "category": "tool",
+    },
+    "BRIEFING_RENDERER_SERVICE_TOKEN": {
+        "description": "Bearer token for the briefing renderer service",
+        "prompt": "Briefing renderer service token",
+        "url": None,
+        "tools": ["create_briefing"],
         "password": True,
         "category": "tool",
     },

@@ -51,6 +51,7 @@ TOOL_KIND_MAP: Dict[str, ToolKind] = {
     "vision_analyze": "read",
     "image_generate": "execute",
     "text_to_speech": "execute",
+    "create_briefing": "execute",
     # Thinking / meta
     "_thinking": "think",
 }
@@ -131,6 +132,9 @@ def build_tool_title(tool_name: str, args: Dict[str, Any]) -> str:
         action = str(args.get("action") or "manage").strip() or "manage"
         target = str(args.get("target") or "memory").strip() or "memory"
         return f"memory {action}: {target}"
+    if tool_name == "create_briefing":
+        title = str(args.get("title") or args.get("topic") or "briefing")
+        return f"briefing: {title}"
     if tool_name == "execute_code":
         code = str(args.get("code") or "").strip()
         first_line = next((line.strip() for line in code.splitlines() if line.strip()), "")

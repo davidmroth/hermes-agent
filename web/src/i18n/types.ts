@@ -226,6 +226,7 @@ export interface Translations {
       telegram: string;
       discord: string;
       slack: string;
+      webui: string;
       email: string;
     };
   };

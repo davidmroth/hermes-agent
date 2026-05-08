@@ -1,0 +1,247 @@
+# =============================================================================
+# Developer-local overrides
+# =============================================================================
+# Source volume mounts for hot-reload during development.
+# This file is auto-merged by `docker compose up`.
+
+services:
+  gateway:
+    environment:
+      - GATEWAY_ALLOW_ALL_USERS=true
+      - CAMOFOX_URL=http://camofox:9377
+      #- PYTHONPATH=/workspace:/opt/hermes
+      # Hindsight memory — local_external mode pointing at the hindsight service
+      - HINDSIGHT_MODE=local_external
+      - HINDSIGHT_API_URL=http://hindsight:8888
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - .data/hermes:/opt/data
+      - .data/hermes/.venv:/opt/hermes/.venv
+      # --- Hot-reload: mount source directories ---
+      - ./run_agent.py:/opt/hermes/run_agent.py
+      - ./model_tools.py:/opt/hermes/model_tools.py
+      - ./toolsets.py:/opt/hermes/toolsets.py
+      - ./cli.py:/opt/hermes/cli.py
+      - ./hermes_state.py:/opt/hermes/hermes_state.py
+      - ./hermes_time.py:/opt/hermes/hermes_time.py
+      - ./hermes_constants.py:/opt/hermes/hermes_constants.py
+      - ./hermes_logging.py:/opt/hermes/hermes_logging.py
+      - ./toolset_distributions.py:/opt/hermes/toolset_distributions.py
+      - ./utils.py:/opt/hermes/utils.py
+      - ./agent:/opt/hermes/agent
+      - ./tools:/opt/hermes/tools
+      - ./hermes_cli:/opt/hermes/hermes_cli
+      - ./gateway:/opt/hermes/gateway
+      - ./cron:/opt/hermes/cron
+      - ./skills:/opt/hermes/skills
+      - ./optional-skills:/opt/hermes/optional-skills
+    extra_hosts:
+      # Point to the actual IP of your llama.cpp server.
+      # Change this if ai.local moves to a different IP.
+      - "ai.local:192.168.87.153"
+    network_mode: !bridge
+    depends_on:
+      camofox:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  dashboard:
+    volumes:
+      - .data/hermes:/opt/data
+    network_mode: !bridge
+
+  # ---------------------------------------------------------------------------
+  # Camofox — Local anti-detection browser (Firefox/Camoufox)
+  # Provides browser automation with C++ fingerprint spoofing.
+  # Hermes browser tools auto-route through Camofox when CAMOFOX_URL is set.
+  #
+  # First-time setup:
+  #   git clone https://github.com/jo-inc/camofox-browser .data/camofox-browser
+  #   cd .data/camofox-browser && make fetch
+  #   cd ../.. && docker compose build camofox
+  # ---------------------------------------------------------------------------
+  camofox:
+    build:
+      context: .services/camofox-browser
+      dockerfile: Dockerfile
+      args:
+        ARCH: x86_64
+        CAMOUFOX_VERSION: "135.0.1"
+        CAMOUFOX_RELEASE: "beta.24"
+    restart: unless-stopped
+    environment:
+      - CAMOFOX_PORT=9377
+      # Persistent browser profiles — Camofox maps userId → profile dir.
+      # Enable managed_persistence in config.yaml for Hermes to send stable IDs.
+      - CAMOFOX_PROFILE_DIR=/data/profiles
+      # Tune for single-agent use (lower resource footprint)
+      - MAX_SESSIONS=10
+      - MAX_TABS_PER_SESSION=5
+      - SESSION_TIMEOUT_MS=1800000
+      - BROWSER_IDLE_TIMEOUT_MS=300000
+      - NODE_OPTIONS=--max-old-space-size=4096
+    volumes:
+      - .data/camofox:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:9377/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # ---------------------------------------------------------------------------
+  # Hindsight — Self-hosted long-term memory with knowledge graph
+  # API on port 8888 (internal), Control Plane UI on port 9999 (exposed).
+  # Uses the same LLM endpoint as Hermes (ai.local) for memory extraction.
+  # Data persists in .data/hindsight (embedded PostgreSQL).
+  #
+  # Access the web UI: http://localhost:9999
+  # ---------------------------------------------------------------------------
+  hindsight:
+    image: ghcr.io/vectorize-io/hindsight:latest
+    restart: unless-stopped
+    environment:
+      # LLM configuration — point at the same model Hermes uses
+      - HINDSIGHT_API_LLM_PROVIDER=openai
+      - HINDSIGHT_API_LLM_BASE_URL=http://ai.local:8000/v1
+      - HINDSIGHT_API_LLM_MODEL=Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf
+      - HINDSIGHT_API_LLM_API_KEY=llama.cpp
+    extra_hosts:
+      - "ai.local:192.168.87.153"
+    volumes:
+      - .data/hindsight:/home/hindsight/.pg0
+    ports:
+      - "9999:9999" # Control Plane web UI
+    expose:
+      - "8888" # API — accessible to hermes via internal network
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+  
+  # ---------------------------------------------------------------------------
+  # OpenCode — ACP sidecar backend for Hermes
+  # Hermes reaches this container via `docker exec ... opencode acp --cwd
+  # /workspace`, while the long-lived `serve` process keeps the sidecar running
+  # and exposes OpenCode's HTTP API for manual attach/debugging.
+  # ---------------------------------------------------------------------------
+  opencode:
+    image: ghcr.io/anomalyco/opencode
+    container_name: hermes-opencode
+    restart: unless-stopped
+    command: ["serve", "--hostname", "0.0.0.0", "--port", "4096"]
+    working_dir: /workspace
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - .data/hermes/workspace:/workspace
+      - .data/opencode:/root
+    ports:
+      - "4096:4096"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # ---------------------------------------------------------------------------
+  # NeuTTS Air — Minimal local TTS sidecar
+  # Host endpoint: http://127.0.0.1:8000/tts
+  # Internal endpoint: http://neutts-air:8000/tts
+  # Model/cache files persist in .services/NeuTTSTTS/cache.
+  # ---------------------------------------------------------------------------
+  neutts-air:
+    build:
+      context: .
+      dockerfile: .services/NeuTTSTTS/Dockerfile
+    restart: unless-stopped
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - NEUTTS_BACKBONE_REPO=neuphonic/neutts-air
+      - NEUTTS_BACKBONE_DEVICE=cpu
+      - NEUTTS_CODEC_DEVICE=cpu
+    ports:
+      - "9099:8000"
+    volumes:
+      - .services/NeuTTSTTS/cache:/root/.cache
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # ---------------------------------------------------------------------------
+  # Kokoro TTS — CPU ONNX sidecar with a NeuTTS-compatible /tts endpoint
+  # Host endpoint: http://127.0.0.1:9100/tts
+  # Internal endpoint: http://kokoro-tts:8000/tts
+  # Model/cache files persist in .services/kokoro-tts/cache.
+  # ---------------------------------------------------------------------------
+  kokoro-tts:
+    build:
+      context: .
+      dockerfile: .services/kokoro-tts/Dockerfile
+    restart: unless-stopped
+    environment:
+      - KOKORO_MODEL_DIR=/models
+      - KOKORO_VOICE=${KOKORO_TTS_VOICE:-af_sky}
+      - KOKORO_LANG=${KOKORO_TTS_LANG:-en-us}
+      - KOKORO_SPEED=${KOKORO_TTS_SPEED:-1.0}
+    ports:
+      - "9100:8000"
+    volumes:
+      - .data/kokoro-tts/cache:/models
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+
+  briefing:
+    build:
+      context: .
+      dockerfile: .services/briefing-service/Dockerfile
+    restart: always
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      BRIEFING_RENDERER_DATA_DIR: /data
+      BRIEFING_RENDERER_SERVICE_TOKEN: ${BRIEFING_RENDERER_SERVICE_TOKEN:-}
+      BRIEFING_RENDERER_MAX_CONCURRENT_JOBS: 1
+      BRIEFING_RENDERER_NARRATION_MODE: ${BRIEFING_RENDERER_NARRATION_MODE:-full}
+      BRIEFING_RENDERER_TTS_PROVIDER: ${BRIEFING_RENDERER_TTS_PROVIDER:-kokoro-tts}
+      BRIEFING_RENDERER_TTS_BASE_URL: ${BRIEFING_RENDERER_TTS_BASE_URL:-http://kokoro-tts:8000}
+    volumes:
+      - .services/briefing-service:/app
+      - .data/briefing:/data
+    ports:
+      - "${BRIEFING_RENDERER_PORT:-9910}:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+volumes:
+  sandbox_workspace:

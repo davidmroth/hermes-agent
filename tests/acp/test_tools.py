@@ -25,7 +25,7 @@ from acp.schema import (
 # ---------------------------------------------------------------------------
 
 
-COMMON_HERMES_TOOLS = ["read_file", "search_files", "terminal", "patch", "write_file", "process"]
+COMMON_HERMES_TOOLS = ["read_file", "search_files", "terminal", "patch", "write_file", "process", "create_briefing"]
 
 
 class TestToolKindMap:
@@ -134,6 +134,10 @@ class TestBuildToolTitle:
             {"action": "patch", "name": "hermes-agent-operations", "file_path": "references/acp.md"},
         )
         assert title == "skill patch: hermes-agent-operations/references/acp.md"
+
+    def test_create_briefing_title(self):
+        title = build_tool_title("create_briefing", {"title": "Daily Briefing"})
+        assert title == "briefing: Daily Briefing"
 
     def test_unknown_tool_uses_name(self):
         title = build_tool_title("some_new_tool", {"foo": "bar"})

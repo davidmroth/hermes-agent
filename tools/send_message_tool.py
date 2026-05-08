@@ -6,12 +6,17 @@ human-friendly channel names to IDs. Works in both CLI and gateway contexts.
 """
 
 import asyncio
+import base64
 import json
 import logging
+import mimetypes
 import os
 import re
+import socket
 import ssl
 import time
+import uuid
+from datetime import datetime, timezone
 from email.utils import formatdate
 from typing import Dict, Optional
 
@@ -138,6 +143,11 @@ SEND_MESSAGE_SCHEMA = {
             "message": {
                 "type": "string",
                 "description": "The message text to send. To send an image or file, include MEDIA:<local_path> (e.g. 'MEDIA:/tmp/hermes/cache/img_xxx.jpg') in the message — the platform will deliver it as a native media attachment."
+            },
+            "media_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional list of absolute file paths to attach to the message. Supported for Telegram, Discord, Matrix, Signal, Weixin, Yuanbao, and WebChat."
             }
         },
         "required": []
@@ -249,20 +259,44 @@ def _handle_send(args):
     force_document_attachments = "[[as_document]]" in message
 
     media_files, cleaned_message = BasePlatformAdapter.extract_media(message)
+    explicit_paths = args.get("media_paths", [])
+    if isinstance(explicit_paths, list):
+        for path in explicit_paths:
+            if isinstance(path, str) and path.strip():
+                media_files.append((path.strip(), False))
     mirror_text = cleaned_message.strip() or _describe_media_for_mirror(media_files)
 
     used_home_channel = False
     if not chat_id:
+        from gateway.session_context import get_session_env
+
+        current_platform = get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower()
+        current_chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "").strip()
+        if platform_name == current_platform and current_chat_id:
+            chat_id = current_chat_id
+
+        if not chat_id and platform_name == "webchat":
+            recent_target = _resolve_recent_session_target(platform_name)
+            if recent_target:
+                parsed_chat_id, parsed_thread_id, _ = _parse_target_ref(platform_name, recent_target)
+                if parsed_chat_id:
+                    chat_id = parsed_chat_id
+                    thread_id = parsed_thread_id
+                elif ":" in recent_target:
+                    chat_id, thread_id = recent_target.split(":", 1)
+                else:
+                    chat_id = recent_target
+
         home = config.get_home_channel(platform)
         if not home and platform_name == "weixin":
             wx_home = os.getenv("WEIXIN_HOME_CHANNEL", "").strip()
             if wx_home:
                 from gateway.config import HomeChannel
                 home = HomeChannel(platform=platform, chat_id=wx_home, name="Weixin Home")
-        if home:
+        if not chat_id and home:
             chat_id = home.chat_id
             used_home_channel = True
-        else:
+        elif not chat_id:
             return json.dumps({
                 "error": f"No home channel set for {platform_name} to determine where to send the message. "
                 f"Either specify a channel directly with '{platform_name}:CHANNEL_NAME', "
@@ -275,15 +309,19 @@ def _handle_send(args):
 
     try:
         from model_tools import _run_async
+        _send_kwargs = {
+            "thread_id": thread_id,
+            "media_files": media_files,
+        }
+        if force_document_attachments:
+            _send_kwargs["force_document"] = True
         result = _run_async(
             _send_to_platform(
                 platform,
                 pconfig,
                 chat_id,
                 cleaned_message,
-                thread_id=thread_id,
-                media_files=media_files,
-                force_document=force_document_attachments,
+                **_send_kwargs,
             )
         )
         if used_home_channel and isinstance(result, dict) and result.get("success"):
@@ -375,6 +413,41 @@ def _describe_media_for_mirror(media_files):
             return "[Sent audio attachment]"
         return "[Sent document attachment]"
     return f"[Sent {len(media_files)} media attachments]"
+
+
+def _resolve_recent_session_target(platform_name: str) -> str | None:
+    """Return the most recently updated target seen for a platform."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        sessions_path = get_hermes_home() / "sessions" / "sessions.json"
+        if not sessions_path.exists():
+            return None
+
+        with open(sessions_path, encoding="utf-8") as handle:
+            sessions = json.load(handle)
+
+        best_target = None
+        best_updated_at = ""
+        for session in sessions.values():
+            origin = session.get("origin") or {}
+            if origin.get("platform") != platform_name:
+                continue
+
+            chat_id = origin.get("chat_id")
+            if not chat_id:
+                continue
+
+            thread_id = origin.get("thread_id")
+            target = f"{chat_id}:{thread_id}" if thread_id else str(chat_id)
+            updated_at = str(session.get("updated_at") or session.get("created_at") or "")
+            if updated_at >= best_updated_at:
+                best_updated_at = updated_at
+                best_target = target
+
+        return best_target
+    except Exception:
+        return None
 
 
 def _get_cron_auto_delivery_target():
@@ -614,29 +687,47 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             last_result = result
         return last_result
 
+    if platform == Platform.WEBCHAT:
+        last_result = None
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            result = await _send_webchat(
+                pconfig.token,
+                pconfig.extra,
+                chat_id,
+                chunk,
+                thread_id=thread_id,
+                media_files=media_files if is_last else [],
+            )
+            if isinstance(result, dict) and result.get("error"):
+                return result
+            last_result = result
+        return last_result
+
     # --- Non-media platforms ---
-    if media_files and not message.strip():
+    if media_files and not message.strip() and platform not in {Platform.SIGNAL, Platform.WEBCHAT}:
         return {
             "error": (
-                f"send_message MEDIA delivery is currently only supported for telegram, discord, matrix, weixin, signal, yuanbao and feishu; "
+                f"send_message MEDIA delivery is currently only supported for telegram, discord, matrix, signal, weixin, yuanbao, feishu and webchat; "
                 f"target {platform.value} had only media attachments"
             )
         }
     warning = None
-    if media_files:
+    if media_files and platform not in {Platform.SIGNAL, Platform.WEBCHAT}:
         warning = (
             f"MEDIA attachments were omitted for {platform.value}; "
-            "native send_message media delivery is currently only supported for telegram, discord, matrix, weixin, signal, yuanbao and feishu"
+            "native send_message media delivery is currently only supported for telegram, discord, matrix, signal, weixin, yuanbao, feishu and webchat"
         )
 
     last_result = None
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        is_last = (i == len(chunks) - 1)
         if platform == Platform.SLACK:
             result = await _send_slack(pconfig.token, chat_id, chunk)
         elif platform == Platform.WHATSAPP:
             result = await _send_whatsapp(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SIGNAL:
-            result = await _send_signal(pconfig.extra, chat_id, chunk)
+            result = await _send_signal(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])
         elif platform == Platform.EMAIL:
             result = await _send_email(pconfig.extra, chat_id, chunk)
         elif platform == Platform.SMS:
@@ -1255,6 +1346,117 @@ async def _send_signal(extra, chat_id, message, media_files=None):
         return result
     except Exception as e:
         return _error(f"Signal send failed: {e}")
+
+
+def _encode_webchat_attachment(file_path):
+    file_name = os.path.basename(file_path)
+    content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    with open(file_path, "rb") as handle:
+        encoded = base64.b64encode(handle.read()).decode("ascii")
+    return {
+        "fileName": file_name,
+        "contentType": content_type,
+        "base64Data": encoded,
+    }
+
+
+def _build_webchat_sender_trace(route_name, base_url, chat_id, attachments, message):
+    session_platform = ""
+    session_chat_id = ""
+
+    try:
+        from gateway.session_context import get_session_env
+
+        session_platform = get_session_env("HERMES_SESSION_PLATFORM", "")
+        session_chat_id = get_session_env("HERMES_SESSION_CHAT_ID", "")
+    except Exception:
+        session_platform = os.getenv("HERMES_SESSION_PLATFORM", "")
+        session_chat_id = os.getenv("HERMES_SESSION_CHAT_ID", "")
+
+    return {
+        "traceId": str(uuid.uuid4()),
+        "route": route_name,
+        "senderBaseUrl": base_url,
+        "senderTargetUrl": f"{base_url}/api/internal/hermes/conversations/{chat_id}/assistant",
+        "senderHostname": socket.gethostname(),
+        "sessionPlatform": session_platform or None,
+        "sessionChatId": session_chat_id or None,
+        "attachmentCount": len(attachments),
+        "attachmentNames": [attachment.get("fileName", "attachment") for attachment in attachments],
+        "contentLength": len(message or ""),
+        "startedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def _send_webchat(token, extra, chat_id, message, thread_id=None, media_files=None):
+    """Send a single assistant message to the web UI service."""
+    try:
+        import httpx
+    except ImportError:
+        return {"error": "httpx not installed"}
+
+    base_url = (extra.get("url") or os.getenv("WEBCHAT_URL", "")).rstrip("/")
+    service_token = token or os.getenv("WEBCHAT_SERVICE_TOKEN", "")
+    if not base_url:
+        return {"error": "Webchat not configured. Set WEBCHAT_URL."}
+    if not service_token:
+        return {"error": "Webchat not configured. Set WEBCHAT_SERVICE_TOKEN."}
+
+    payload = {
+        "conversationId": chat_id,
+        "content": message,
+    }
+    if thread_id:
+        payload["threadId"] = thread_id
+
+    attachments = []
+    warnings = []
+    for media_path, _is_voice in (media_files or []):
+        if not os.path.exists(media_path):
+            warning = f"Media file not found, skipping: {media_path}"
+            logger.warning(warning)
+            warnings.append(warning)
+            continue
+        try:
+            attachments.append(_encode_webchat_attachment(media_path))
+        except Exception as e:
+            warning = _sanitize_error_text(f"Failed to attach media {media_path}: {e}")
+            logger.warning(warning)
+            warnings.append(warning)
+
+    if attachments:
+        payload["attachments"] = attachments
+
+    sender_trace = _build_webchat_sender_trace("send_message_tool", base_url, chat_id, attachments, message)
+    payload["senderTrace"] = sender_trace
+
+    headers = {"Authorization": f"Bearer {service_token}"}
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base_url}/api/internal/hermes/conversations/{chat_id}/assistant",
+                json=payload,
+                headers=headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        result = {
+            "success": True,
+            "platform": "webchat",
+            "chat_id": chat_id,
+            "message_id": data.get("messageId") or data.get("id"),
+            "sender_trace_id": sender_trace["traceId"],
+            "sender_target_url": sender_trace["senderTargetUrl"],
+        }
+        if warnings:
+            result["warnings"] = warnings
+        return result
+    except Exception as e:
+        return {
+            "error": f"Webchat send failed: {e}",
+            "sender_trace_id": sender_trace["traceId"],
+            "sender_target_url": sender_trace["senderTargetUrl"],
+        }
 
 
 async def _send_email(extra, chat_id, message):

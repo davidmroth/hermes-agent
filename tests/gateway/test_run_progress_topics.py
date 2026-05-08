@@ -482,6 +482,28 @@ class PreviewedResponseAgent:
         }
 
 
+class PreviewedTimedResponseAgent:
+    def __init__(self, **kwargs):
+        self.interim_assistant_callback = kwargs.get("interim_assistant_callback")
+        self.tools = []
+
+    def run_conversation(self, message, conversation_history=None, task_id=None):
+        if self.interim_assistant_callback:
+            self.interim_assistant_callback("You're welcome.", already_streamed=False)
+        return {
+            "final_response": "You're welcome.",
+            "response_previewed": True,
+            "messages": [],
+            "api_calls": 1,
+            "timings": {
+                "prompt_n": 11,
+                "prompt_ms": 24.5,
+                "predicted_n": 6,
+                "predicted_ms": 31.0,
+            },
+        }
+
+
 class StreamingRefineAgent:
     def __init__(self, **kwargs):
         self.stream_delta_callback = kwargs.get("stream_delta_callback")
@@ -766,6 +788,39 @@ async def test_run_agent_previewed_final_marks_already_sent(monkeypatch, tmp_pat
     assert [call["content"] for call in adapter.sent] == ["You're welcome."]
 
 
+def test_run_agent_previewed_webchat_response_reconciles_timings(monkeypatch, tmp_path):
+    async def _exercise():
+        adapter, result = await _run_with_agent(
+            monkeypatch,
+            tmp_path,
+            PreviewedTimedResponseAgent,
+            session_id="sess-previewed-webchat",
+            platform=Platform.WEBCHAT,
+            chat_id="conv-previewed",
+            chat_type="dm",
+            config_data={
+                "display": {"interim_assistant_messages": True},
+                "streaming": {"enabled": False},
+            },
+            adapter_cls=NonEditingProgressCaptureAdapter,
+        )
+
+        assert result.get("already_sent") is True
+        assert [call["content"] for call in adapter.sent] == ["You're welcome.", "You're welcome."]
+        assert adapter.sent[1]["metadata"] == {
+            "thread_id": "17585",
+            "message_id": "progress-1",
+            "timings": {
+                "prompt_n": 11,
+                "prompt_ms": 24.5,
+                "predicted_n": 6,
+                "predicted_ms": 31.0,
+            },
+        }
+
+    asyncio.run(_exercise())
+
+
 @pytest.mark.asyncio
 async def test_run_agent_matrix_streaming_omits_cursor(monkeypatch, tmp_path):
     adapter, result = await _run_with_agent(
@@ -820,6 +875,43 @@ async def test_run_agent_defers_background_review_notification_until_release(mon
 
     assert result["final_response"] == "done"
     assert adapter.sent == []
+
+
+def test_webchat_background_review_notification_is_system_metadata(monkeypatch, tmp_path):
+    async def _exercise():
+        adapter, result = await _run_with_agent(
+            monkeypatch,
+            tmp_path,
+            BackgroundReviewAgent,
+            session_id="sess-webchat-bg-review",
+            platform=Platform.WEBCHAT,
+            chat_id="conv-1",
+            chat_type="direct",
+            thread_id=None,
+            config_data={"display": {"interim_assistant_messages": True}},
+        )
+
+        assert result["final_response"] == "done"
+        assert adapter.sent == []
+
+        callback = adapter.pop_post_delivery_callback("agent:main:webchat:direct:conv-1")
+        assert callback is not None
+        callback()
+        for _ in range(10):
+            if adapter.sent:
+                break
+            await asyncio.sleep(0.01)
+
+        assert adapter.sent == [
+            {
+                "chat_id": "conv-1",
+                "content": "💾 Skill 'prospect-scanner' created.",
+                "reply_to": None,
+                "metadata": {"message_role": "system"},
+            }
+        ]
+
+    asyncio.run(_exercise())
 
 
 @pytest.mark.asyncio

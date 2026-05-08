@@ -372,11 +372,17 @@ PLATFORM_HINTS = {
         "key: value pairs over pipe tables (any tables you do emit are "
         "auto-rewritten into row-group bullets, which you can produce "
         "directly for cleaner output). "
-        "You can send media files natively: to deliver a file to the user, "
+        "You CAN and MUST send files to the user when asked. To deliver any file, "
         "include MEDIA:/absolute/path/to/file in your response. Images "
         "(.png, .jpg, .webp) appear as photos, audio (.ogg) sends as voice "
-        "bubbles, and videos (.mp4) play inline. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as native photos."
+        "bubbles, videos (.mp4) play inline, and all other files (.pdf, .html, "
+        ".csv, .zip, .txt, .md, etc.) are sent as downloadable document attachments. "
+        "You can also include image URLs in markdown format ![alt](url) and they "
+        "will be sent as native photos. Whenever you create, save, or write a file "
+        "that the user needs, you MUST include MEDIA:/absolute/path/to/file so it is "
+        "delivered as an attachment. Do not just tell the user the file path — they "
+        "cannot access your filesystem. Never tell the user you cannot send files — "
+        "you can. Just use MEDIA:/path."
     ),
     "discord": (
         "You are in a Discord server or group chat communicating with your user. "
@@ -395,11 +401,23 @@ PLATFORM_HINTS = {
     "signal": (
         "You are on a text messaging communication platform, Signal. "
         "Please do not use markdown as it does not render. "
-        "You can send media files natively: to deliver a file to the user, "
+        "You CAN and MUST send files to the user when asked. To deliver any file, "
         "include MEDIA:/absolute/path/to/file in your response. Images "
-        "(.png, .jpg, .webp) appear as photos, audio as attachments, and other "
-        "files arrive as downloadable documents. You can also include image "
-        "URLs in markdown format ![alt](url) and they will be sent as photos."
+        "(.png, .jpg, .webp) appear as photos, audio as attachments, and all other "
+        "files (.pdf, .html, .csv, .zip, .txt, .md, etc.) arrive as downloadable "
+        "document attachments. You can also include image URLs in markdown format "
+        "![alt](url) and they will be sent as photos. Whenever you create, save, or "
+        "write a file that the user needs, you MUST include MEDIA:/absolute/path/to/file "
+        "so it is delivered as an attachment. Do not just tell the user the file path — "
+        "they cannot access your filesystem. Never tell the user you cannot send files — "
+        "you can. Just use MEDIA:/path."
+    ),
+    "webchat": (
+        "You are in a browser-based messaging interface that behaves like a direct chat "
+        "channel. Use concise markdown-friendly responses and assume the user can scroll "
+        "conversation history, see streaming updates, and revisit prior messages later. "
+        "When you create files for the user, reference them naturally, but do not assume "
+        "direct filesystem access from the browser."
     ),
     "email": (
         "You are communicating via email. Write clear, well-structured responses "

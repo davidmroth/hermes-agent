@@ -1924,8 +1924,26 @@ class BasePlatformAdapter(ABC):
         
         # Extract MEDIA:<path> tags, allowing optional whitespace after the colon
         # and quoted/backticked paths for LLM-formatted outputs.
+        _LOCAL_MEDIA_EXTS = (
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".mov", ".avi", ".mkv", ".webm",
+            ".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac",
+        )
+        _LOCAL_DOC_EXTS = (
+            ".epub", ".pdf", ".md", ".txt", ".csv", ".json", ".html", ".htm",
+            ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".rtf",
+            ".zip", ".tar", ".gz", ".7z", ".rar", ".apk", ".ipa",
+            ".log", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+            ".py", ".js", ".ts", ".sh", ".bash", ".sql",
+        )
+        ext_part = "|".join(
+            ext.lstrip(".") for ext in (_LOCAL_MEDIA_EXTS + _LOCAL_DOC_EXTS)
+        )
         media_pattern = re.compile(
-            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:png|jpe?g|gif|webp|mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a|flac|epub|pdf|zip|rar|7z|docx?|xlsx?|pptx?|txt|csv|apk|ipa)(?=[\s`"',;:)\]}]|$)|\S+)[`"']?'''
+            r'''[`"']?MEDIA:\s*(?P<path>`[^`\n]+`|"[^"\n]+"|'[^'\n]+'|(?:~/|/)\S+(?:[^\S\n]+\S+)*?\.(?:'''
+            + ext_part
+            + r''')(?=[\s`"',;:)\]}]|$)|\S+)[`"']?''',
+            re.IGNORECASE,
         )
         for match in media_pattern.finditer(content):
             path = match.group("path").strip()
@@ -1960,10 +1978,19 @@ class BasePlatformAdapter(ABC):
             raw path strings removed).
         """
         _LOCAL_MEDIA_EXTS = (
-            '.png', '.jpg', '.jpeg', '.gif', '.webp',
-            '.mp4', '.mov', '.avi', '.mkv', '.webm',
+            ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            ".mp4", ".mov", ".avi", ".mkv", ".webm",
         )
-        ext_part = '|'.join(e.lstrip('.') for e in _LOCAL_MEDIA_EXTS)
+        _LOCAL_DOC_EXTS = (
+            ".pdf", ".md", ".txt", ".csv", ".json", ".html", ".htm",
+            ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".rtf",
+            ".zip", ".tar", ".gz", ".7z", ".rar",
+            ".log", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+            ".py", ".js", ".ts", ".sh", ".bash", ".sql",
+        )
+        ext_part = '|'.join(
+            e.lstrip('.') for e in (_LOCAL_MEDIA_EXTS + _LOCAL_DOC_EXTS)
+        )
 
         # (?<![/:\w.]) prevents matching inside URLs (e.g. https://…/img.png)
         #             and relative paths (./foo.png)
@@ -2782,6 +2809,15 @@ class BasePlatformAdapter(ABC):
         interrupt_event = self._active_sessions.get(session_key) or asyncio.Event()
         self._active_sessions[session_key] = interrupt_event
         
+        def _build_delivery_metadata() -> Optional[dict]:
+            metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
+            if self.platform == Platform.WEBCHAT:
+                timings = getattr(event, "_hermes_timings", None)
+                if timings:
+                    metadata = dict(metadata or {})
+                    metadata["timings"] = timings
+            return metadata
+
         # Start continuous typing indicator (refreshes every 2 seconds)
         _thread_metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
         _keep_typing_kwargs = {"metadata": _thread_metadata}
@@ -2845,11 +2881,10 @@ class BasePlatformAdapter(ABC):
             if not response:
                 logger.debug("[%s] Handler returned empty/None response for %s", self.name, event.source.chat_id)
             if response:
+                _delivery_metadata = _build_delivery_metadata()
                 # Capture [[as_document]] before extract_media strips it, so the
                 # dispatch partition below can route image-extension files
-                # through send_document instead of send_multiple_images. Used
-                # by skills that produce large/lossless images (e.g. info-graph)
-                # where Telegram's sendPhoto recompression destroys legibility.
+                # through send_document instead of send_multiple_images.
                 force_document_attachments = "[[as_document]]" in response
 
                 # Extract MEDIA:<path> tags (from TTS tool) before other processing
@@ -2900,7 +2935,7 @@ class BasePlatformAdapter(ABC):
                         await self.play_tts(
                             chat_id=event.source.chat_id,
                             audio_path=_tts_path,
-                            metadata=_thread_metadata,
+                            metadata=_delivery_metadata,
                         )
                     finally:
                         try:
@@ -2920,7 +2955,7 @@ class BasePlatformAdapter(ABC):
                         chat_id=event.source.chat_id,
                         content=text_content,
                         reply_to=_reply_anchor,
-                        metadata=_thread_metadata,
+                        metadata=_delivery_metadata,
                     )
                     _record_delivery(result)
 
@@ -2949,7 +2984,7 @@ class BasePlatformAdapter(ABC):
                         await self.send_multiple_images(
                             chat_id=event.source.chat_id,
                             images=images,
-                            metadata=_thread_metadata,
+                            metadata=_delivery_metadata,
                             human_delay=human_delay,
                         )
                     except Exception as batch_err:
@@ -2991,7 +3026,7 @@ class BasePlatformAdapter(ABC):
                         await self.send_multiple_images(
                             chat_id=event.source.chat_id,
                             images=_batch,
-                            metadata=_thread_metadata,
+                            metadata=_delivery_metadata,
                             human_delay=human_delay,
                         )
                     except Exception as batch_err:
@@ -3006,19 +3041,19 @@ class BasePlatformAdapter(ABC):
                             media_result = await self.send_voice(
                                 chat_id=event.source.chat_id,
                                 audio_path=media_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                         elif ext in _VIDEO_EXTS:
                             media_result = await self.send_video(
                                 chat_id=event.source.chat_id,
                                 video_path=media_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                         else:
                             media_result = await self.send_document(
                                 chat_id=event.source.chat_id,
                                 file_path=media_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
 
                         if not media_result.success:
@@ -3036,13 +3071,13 @@ class BasePlatformAdapter(ABC):
                             await self.send_video(
                                 chat_id=event.source.chat_id,
                                 video_path=file_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                         else:
                             await self.send_document(
                                 chat_id=event.source.chat_id,
                                 file_path=file_path,
-                                metadata=_thread_metadata,
+                                metadata=_delivery_metadata,
                             )
                     except Exception as file_err:
                         logger.error("[%s] Error sending local file %s: %s", self.name, file_path, file_err)
@@ -3104,6 +3139,27 @@ class BasePlatformAdapter(ABC):
         except Exception as e:
             await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)
             logger.error("[%s] Error handling message: %s", self.name, e, exc_info=True)
+            try:
+                from gateway.error_debug import log_exception_diagnostics
+
+                log_exception_diagnostics(
+                    logger,
+                    e,
+                    context="platform_message_handler",
+                    fields={
+                        "platform": self.name,
+                        "chat_id": getattr(event.source, "chat_id", None),
+                        "thread_id": getattr(event.source, "thread_id", None),
+                        "message_id": getattr(event, "message_id", None),
+                        "message_type": getattr(
+                            getattr(event, "message_type", None),
+                            "value",
+                            None,
+                        ),
+                    },
+                )
+            except Exception:
+                pass
             # Send the error to the user so they aren't left with radio silence
             try:
                 error_type = type(e).__name__

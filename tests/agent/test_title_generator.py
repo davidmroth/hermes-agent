@@ -5,11 +5,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import agent.title_generator as title_generator
 from agent.title_generator import (
     generate_title,
     auto_title_session,
     maybe_auto_title,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_auto_title_attempts():
+    with title_generator._attempted_sessions_lock:
+        title_generator._attempted_sessions.clear()
+    yield
+    with title_generator._attempted_sessions_lock:
+        title_generator._attempted_sessions.clear()
 
 
 class TestGenerateTitle:
@@ -238,3 +248,23 @@ class TestMaybeAutoTitle:
 
     def test_skips_if_no_session_db(self):
         maybe_auto_title(None, "sess-1", "hello", "response", [])  # no db
+
+    def test_skips_repeated_attempt_for_same_session(self):
+        db = MagicMock()
+        history = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi there"},
+            {"role": "user", "content": "follow-up"},
+            {"role": "assistant", "content": "follow-up reply"},
+        ]
+
+        with patch("agent.title_generator.auto_title_session") as mock_auto:
+            maybe_auto_title(db, "sess-1", "hello", "hi there", history[:2])
+            import time
+            time.sleep(0.3)
+            maybe_auto_title(db, "sess-1", "follow-up", "follow-up reply", history)
+            time.sleep(0.1)
+
+        mock_auto.assert_called_once_with(
+            db, "sess-1", "hello", "hi there", failure_callback=None, main_runtime=None
+        )
