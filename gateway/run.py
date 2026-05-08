@@ -6903,6 +6903,7 @@ class GatewayRunner:
             response = _normalize_empty_agent_response(
                 agent_result, response, history_len=len(history),
             )
+            transcript_response = response
 
             # If the agent's session_id changed during compression, update
             # session_entry so transcript writes below go to the right session.
@@ -7102,6 +7103,11 @@ class GatewayRunner:
             else:
                 history_len = agent_result.get("history_offset", len(history))
                 new_messages = agent_messages[history_len:] if len(agent_messages) > history_len else []
+                transcript_response_key = re.sub(
+                    r"(?m)^(?:\[\[audio_as_voice\]\]|MEDIA:\S+)\s*$",
+                    "",
+                    transcript_response or "",
+                ).strip()
 
                 # If no new messages found (edge case), fall back to simple user/assistant
                 if not new_messages:
@@ -7120,15 +7126,33 @@ class GatewayRunner:
                     # to prevent the duplicate-write bug (#860).  We still write
                     # to JSONL for backward compatibility and as a backup.
                     agent_persisted = self._session_db is not None
+                    assistant_persisted = False
                     for msg in new_messages:
                         # Skip system messages (they're rebuilt each run)
                         if msg.get("role") == "system":
                             continue
+                        if msg.get("role") == "assistant":
+                            msg_content_key = re.sub(
+                                r"(?m)^(?:\[\[audio_as_voice\]\]|MEDIA:\S+)\s*$",
+                                "",
+                                str(msg.get("content") or ""),
+                            ).strip()
+                            if msg_content_key == transcript_response_key:
+                                assistant_persisted = True
                         # Add timestamp to each message for debugging
                         entry = {**msg, "timestamp": ts}
                         self.session_store.append_to_transcript(
                             session_entry.session_id, entry,
                             skip_db=agent_persisted,
+                        )
+                    if transcript_response and not assistant_persisted:
+                        self.session_store.append_to_transcript(
+                            session_entry.session_id,
+                            {
+                                "role": "assistant",
+                                "content": transcript_response,
+                                "timestamp": ts,
+                            },
                         )
             
             # Token counts and model are now persisted by the agent directly.

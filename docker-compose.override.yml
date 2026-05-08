@@ -9,7 +9,8 @@ services:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
       - CAMOFOX_URL=http://camofox:9377
-      #- PYTHONPATH=/workspace:/opt/hermes
+      - PYTHONPATH=/workspace:/opt/hermes:/opt/agentlens
+      - AGENTLENS_SERVER_URL=http://agentlens:8500
       # Hindsight memory — local_external mode pointing at the hindsight service
       - HINDSIGHT_MODE=local_external
       - HINDSIGHT_API_URL=http://hindsight:8888
@@ -19,6 +20,8 @@ services:
     volumes:
       - .data/hermes:/opt/data
       - .data/hermes/.venv:/opt/hermes/.venv
+      - ./.services/agentlens:/opt/agentlens:ro
+      - ./.services/agentlens/plugin:/opt/data/plugins/agentlens:ro
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py
@@ -43,6 +46,8 @@ services:
       - "ai.local:192.168.87.153"
     network_mode: !bridge
     depends_on:
+      agentlens:
+        condition: service_healthy
       camofox:
         condition: service_healthy
     logging:
@@ -164,6 +169,37 @@ services:
       - .data/opencode:/root
     ports:
       - "4096:4096"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
+  # ---------------------------------------------------------------------------
+  # AgentLens — Agent telemetry server + dashboard
+  # Hosts the ingest API and UI for Hermes observability.
+  # ---------------------------------------------------------------------------
+  agentlens:
+    build:
+      context: .services/agentlens
+    container_name: agentlens
+    restart: unless-stopped
+    ports:
+      - "8500:8500"
+    volumes:
+      - .data/agentlens:/data
+    environment:
+      - AGENTLENS_HOST=0.0.0.0
+      - AGENTLENS_PORT=8500
+      - AGENTLENS_STORAGE=sqlite
+      - AGENTLENS_SQLITE_PATH=/data/agentlens.db
+      - AGENTLENS_RETENTION_DAYS=30
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
     logging:
       driver: "json-file"
       options:
