@@ -117,6 +117,9 @@ This Hermes integration assumes the sibling WebUI exposes the following authenti
   - Returns `204` when there is no queued event
   - Returns a JSON event payload when work is waiting
 
+- `POST /api/internal/hermes/commands`
+  - Stores the current Hermes gateway-visible slash command catalog for browser autocomplete
+
 - `POST /api/internal/hermes/events/{eventId}/ack`
   - Marks an inbox event as processed
 
@@ -137,14 +140,15 @@ All of these are authenticated with:
 
 1. Hermes starts the gateway and creates `WebChatAdapter`.
 2. The adapter checks `GET /api/internal/hermes/health`.
-3. If the check passes, the adapter starts a poll loop.
-4. The poll loop calls `GET /api/internal/hermes/inbox/next`.
-5. If the WebUI returns an event, Hermes converts it into a `MessageEvent`.
-6. If the event includes attachments, Hermes downloads them and stores them in the local image, audio, or document cache.
-7. Hermes runs the normal gateway message pipeline and agent flow.
-8. Hermes posts the assistant reply to `POST /api/internal/hermes/conversations/{conversationId}/assistant`.
-9. Hermes only acks the event after successful processing.
-10. Failed events are intentionally left unacked so the WebUI can retry them.
+3. Hermes posts the current gateway slash command catalog to `POST /api/internal/hermes/commands`.
+4. If the check passes, the adapter starts a poll loop.
+5. The poll loop calls `GET /api/internal/hermes/inbox/next`.
+6. If the WebUI returns an event, Hermes converts it into a `MessageEvent`.
+7. If the event includes attachments, Hermes downloads them and stores them in the local image, audio, or document cache.
+8. Hermes runs the normal gateway message pipeline and agent flow.
+9. Hermes posts the assistant reply to `POST /api/internal/hermes/conversations/{conversationId}/assistant`.
+10. Hermes only acks the event after successful processing.
+11. Failed events are intentionally left unacked so the WebUI can retry them.
 
 ### Important implementation details
 

@@ -1,6 +1,6 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent, MessageType, ProcessingOutcome
@@ -237,6 +237,54 @@ def test_fetch_conversation_context_resolves_relative_url():
             "Authorization": "Bearer svc-token",
         },
     )
+
+
+def test_sync_slash_commands_posts_gateway_catalog():
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["url"] = url
+        posted["json"] = json
+        posted["headers"] = headers
+        return _Response(payload={"ok": True})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    asyncio.run(adapter._sync_slash_commands())
+
+    assert posted["url"] == "http://webui:3000/api/internal/hermes/commands"
+    assert posted["headers"] == {
+        "Accept": "application/json",
+        "Authorization": "Bearer svc-token",
+    }
+    new_entry = next(entry for entry in posted["json"]["commands"] if entry["command"] == "/new")
+    assert new_entry["requiresConfirmation"] is True
+    assert new_entry["aliases"] == ["/reset"]
+    assert "/clear" not in {entry["command"] for entry in posted["json"]["commands"]}
+
+
+def test_connect_syncs_slash_commands_after_health_check():
+    adapter = _build_adapter()
+    fake_client = Mock()
+    fake_client.get = AsyncMock(return_value=_Response(payload={"ok": True}))
+    fake_task = Mock()
+    fake_task.add_done_callback = Mock()
+
+    def _create_task(coro):
+        coro.close()
+        return fake_task
+
+    with (
+        patch("gateway.platforms.webchat.httpx.AsyncClient", return_value=fake_client),
+        patch.object(adapter, "_sync_slash_commands", AsyncMock()) as mock_sync,
+        patch("gateway.platforms.webchat.asyncio.create_task", side_effect=_create_task),
+    ):
+        connected = asyncio.run(adapter.connect())
+
+    assert connected is True
+    mock_sync.assert_awaited_once()
 
 
 def test_load_history_for_event_ignores_stale_context_version():

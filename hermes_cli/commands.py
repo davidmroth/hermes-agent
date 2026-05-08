@@ -55,6 +55,7 @@ class CommandDef:
     cli_only: bool = False             # only available in CLI
     gateway_only: bool = False         # only available in gateway/messaging
     gateway_config_gate: str | None = None  # config dotpath; when truthy, overrides cli_only for gateway
+    requires_confirmation: bool = False  # prompt for confirmation before immediate execution in UI surfaces
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +65,7 @@ class CommandDef:
 COMMAND_REGISTRY: list[CommandDef] = [
     # Session
     CommandDef("new", "Start a new session (fresh session ID + history)", "Session",
-               aliases=("reset",), args_hint="[name]"),
+               aliases=("reset",), args_hint="[name]", requires_confirmation=True),
     CommandDef("topic", "Enable or inspect Telegram DM topic sessions", "Session",
                gateway_only=True, args_hint="[off|help|session-id]"),
     CommandDef("clear", "Clear screen and start a new session", "Session",
@@ -423,6 +424,39 @@ def gateway_help_lines() -> list[str]:
         alias_note = f" (alias: {', '.join(alias_parts)})" if alias_parts else ""
         lines.append(f"`/{cmd.name}{args}` -- {cmd.description}{alias_note}")
     return lines
+
+
+def gateway_command_catalog() -> list[dict[str, Any]]:
+    """Return structured gateway-visible command metadata for external UIs."""
+    overrides = _resolve_config_gates()
+    catalog: list[dict[str, Any]] = []
+
+    for cmd in COMMAND_REGISTRY:
+        if not _is_gateway_available(cmd, overrides):
+            continue
+        entry: dict[str, Any] = {
+            "command": f"/{cmd.name}",
+            "description": cmd.description,
+            "category": cmd.category,
+        }
+        if cmd.args_hint:
+            entry["argsHint"] = cmd.args_hint
+        if cmd.aliases:
+            entry["aliases"] = [f"/{alias}" for alias in cmd.aliases]
+        if cmd.requires_confirmation:
+            entry["requiresConfirmation"] = True
+        catalog.append(entry)
+
+    for name, description, args_hint in _iter_plugin_command_entries():
+        entry: dict[str, Any] = {
+            "command": f"/{name}",
+            "description": description,
+        }
+        if args_hint:
+            entry["argsHint"] = args_hint
+        catalog.append(entry)
+
+    return catalog
 
 
 def _iter_plugin_command_entries() -> list[tuple[str, str, str]]:

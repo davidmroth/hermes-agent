@@ -280,6 +280,9 @@ class WebChatAdapter(BasePlatformAdapter):
     def _stop_typing_url(self, conversation_id: str) -> str:
         return f"{self._base_url}/api/internal/hermes/conversations/{conversation_id}/typing/stop"
 
+    def _commands_url(self) -> str:
+        return f"{self._base_url}/api/internal/hermes/commands"
+
     async def fetch_conversation_context(self, context_url: str) -> Optional[Dict[str, Any]]:
         if self._client is None:
             return None
@@ -346,12 +349,30 @@ class WebChatAdapter(BasePlatformAdapter):
                 self._client = None
             return False
 
+        try:
+            await self._sync_slash_commands()
+        except Exception as exc:
+            logger.warning("[%s] Failed to sync slash commands to webchat: %s", self.name, exc)
+
         self._mark_connected()
         self._poll_task = asyncio.create_task(self._poll_loop())
         self._background_tasks.add(self._poll_task)
         self._poll_task.add_done_callback(self._background_tasks.discard)
         logger.info("[%s] Connected to %s", self.name, self._base_url)
         return True
+
+    async def _sync_slash_commands(self) -> None:
+        if self._client is None:
+            return
+
+        from hermes_cli.commands import gateway_command_catalog
+
+        response = await self._client.post(
+            self._commands_url(),
+            json={"commands": gateway_command_catalog()},
+            headers=self._headers(),
+        )
+        response.raise_for_status()
 
     async def disconnect(self) -> None:
         self._mark_disconnected()

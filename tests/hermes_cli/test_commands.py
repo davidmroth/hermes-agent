@@ -19,6 +19,7 @@ from hermes_cli.commands import (
     _clamp_telegram_names,
     _sanitize_telegram_name,
     discord_skill_commands,
+    gateway_command_catalog,
     gateway_help_lines,
     resolve_command,
     slack_app_manifest,
@@ -213,6 +214,20 @@ class TestGatewayHelpLines:
         bg_line = [l for l in lines if "/background" in l]
         assert len(bg_line) == 1
         assert "/bg" in bg_line[0]
+
+
+class TestGatewayCommandCatalog:
+    def test_exports_gateway_visible_commands_with_confirmation_metadata(self):
+        catalog = gateway_command_catalog()
+        new_entry = next(entry for entry in catalog if entry["command"] == "/new")
+
+        assert new_entry["requiresConfirmation"] is True
+        assert new_entry["aliases"] == ["/reset"]
+        assert new_entry["category"] == "Session"
+
+    def test_excludes_cli_only_commands_without_gateway_access(self):
+        commands = {entry["command"] for entry in gateway_command_catalog()}
+        assert "/clear" not in commands
 
 
 class TestTelegramBotCommands:
