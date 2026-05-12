@@ -124,7 +124,6 @@ all = [
   "hermes-agent[dingtalk]",
   "hermes-agent[feishu]",
   "hermes-agent[google]",
-  "hermes-agent[mistral]",
   "hermes-agent[bedrock]",
   "hermes-agent[web]",
 ]
