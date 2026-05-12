@@ -44,6 +44,7 @@ Do not say you will render the briefing later. When the briefing structure is re
    Put important numeric facts into `metrics`. Add `citations` that point to real `source_id` entries from the top-level `sources` list.
 6. Render with `create_briefing`.
    Surface the returned `job_id`, validation warnings, and the WebUI standalone HTML path `/briefings/<job_id>` when the conversation is happening in WebUI. Use `/briefings/<job_id>/player` only when you specifically need the interactive player route. Do not rewrite either path to `localhost`, `127.0.0.1`, or any other absolute URL.
+   Copy the `job_id` exactly from the `create_briefing` tool result. Never paraphrase, transform, regenerate, shorten, or "reconstruct" it from memory. If you cannot quote the exact returned `job_id`, omit it instead of guessing.
 
 ## Payload Guidance
 
@@ -67,6 +68,7 @@ Do not say you will render the briefing later. When the briefing structure is re
    - the exact HTML path `/briefings/<job_id>` if available,
    - the player path `/briefings/<job_id>/player` only if you also need the interactive player route.
 5. Do not substitute a host-prefixed URL such as `http://localhost:3001/briefings/<job_id>`.
+6. If you mention the `job_id`, it must be byte-for-byte identical to the tool output. A wrong `job_id` is worse than no `job_id`.
 
 ## Quality Bar
 

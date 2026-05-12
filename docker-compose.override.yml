@@ -252,6 +252,7 @@ services:
       - .env
     environment:
       BRIEFING_RENDERER_DATA_DIR: /data
+      # Optional: only needed if the renderer is configured to require bearer auth.
       BRIEFING_RENDERER_SERVICE_TOKEN: ${BRIEFING_RENDERER_SERVICE_TOKEN:-}
       BRIEFING_RENDERER_MAX_CONCURRENT_JOBS: 1
       BRIEFING_RENDERER_NARRATION_MODE: ${BRIEFING_RENDERER_NARRATION_MODE:-full}

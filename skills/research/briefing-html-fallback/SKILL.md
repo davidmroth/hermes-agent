@@ -21,6 +21,7 @@ Use this skill only when the briefing renderer tool is unavailable or the user e
 ## Core Rule
 
 Do not promise a `/briefings/<job_id>` preview path from `create_briefing` when that tool is unavailable. In this path, you are producing a self-contained HTML file and delivering it directly to webchat.
+Do not invent, infer, or restate a renderer `job_id` on this path unless you are copying an exact `job_id` from a real `create_briefing` tool result that already happened earlier in the same conversation.
 
 ## Workflow
 
@@ -34,6 +35,7 @@ Do not promise a `/briefings/<job_id>` preview path from `create_briefing` when 
    Call `send_html_to_webchat` with the file path and a short caption summarizing the briefing.
 5. Reply with what you delivered.
    Summarize the briefing, note any caveats, and tell the user that the HTML file was sent to the chat.
+6. If no real renderer `job_id` is available from tool output, omit `job_id` entirely. Never fabricate one for the HTML file.
 
 ## HTML Guidance
 
