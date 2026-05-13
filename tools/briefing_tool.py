@@ -305,9 +305,21 @@ def _build_summary(result: dict[str, Any], base_url: str) -> dict[str, Any]:
         "source_count": len(result.get("sources") or []),
         "validation": result.get("validation") or {"valid": True, "warnings": [], "errors": []},
         "asset_urls": asset_urls,
+        "webui_manifest_path": f"/briefings/{job_id}/manifest",
+        "webui_asset_base_path": f"/briefings/{job_id}/assets",
         "webui_preview_path": f"/briefings/{job_id}/player",
         "webui_standalone_html_path": f"/briefings/{job_id}",
     }
+    published_bundle = result.get("published_bundle")
+    if isinstance(published_bundle, dict):
+        summary["published_bundle"] = {
+            "provider": published_bundle.get("provider"),
+            "published_at": published_bundle.get("published_at"),
+            "webui_path": published_bundle.get("webui_path") or f"/briefings/{job_id}",
+            "webui_player_path": published_bundle.get("webui_player_path") or f"/briefings/{job_id}/player",
+            "webui_manifest_path": published_bundle.get("webui_manifest_path") or f"/briefings/{job_id}/manifest",
+            "webui_asset_base_path": published_bundle.get("webui_asset_base_path") or f"/briefings/{job_id}/assets",
+        }
     manifest_path = result.get("manifest_path")
     audio_path = result.get("audio_path")
     standalone_html_path = result.get("standalone_html_path")
