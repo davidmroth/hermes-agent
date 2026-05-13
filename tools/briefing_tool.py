@@ -155,6 +155,38 @@ CREATE_BRIEFING_SCHEMA = {
 }
 
 
+POLL_BRIEFING_STATUS_SCHEMA = {
+    "name": "poll_briefing_status",
+    "description": (
+        "Poll a renderer-backed briefing job after create_briefing returns asynchronously. "
+        "Checks /v1/briefings/<job_id> for current progress and, once completed, fetches /v1/briefings/<job_id>/result. "
+        "Use this when create_briefing was called with wait_for_completion=false or when you need to resume monitoring a known job id."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "job_id": {
+                "type": "string",
+                "description": "Renderer job id returned by create_briefing.",
+            },
+            "wait_for_completion": {
+                "type": "boolean",
+                "description": "Wait until the briefing completes or max_wait_seconds is reached. Defaults to true.",
+            },
+            "max_wait_seconds": {
+                "type": "number",
+                "description": "Optional maximum time to wait while polling. Defaults to briefing.max_wait_seconds from config.",
+            },
+            "poll_interval_seconds": {
+                "type": "number",
+                "description": "Optional delay between polls. Defaults to briefing.poll_interval_seconds from config; use 10-15 seconds for long-running renderer jobs.",
+            },
+        },
+        "required": ["job_id"],
+    },
+}
+
+
 def _briefing_config() -> dict[str, Any]:
     return (load_config() or {}).get("briefing", {}) or {}
 
@@ -332,6 +364,69 @@ def _build_summary(result: dict[str, Any], base_url: str) -> dict[str, Any]:
     return summary
 
 
+def _poll_briefing_job(
+    client: httpx.Client,
+    *,
+    job_id: str,
+    base_url: str,
+    wait_for_completion: bool,
+    max_wait_seconds: float,
+    poll_interval_seconds: float,
+) -> dict[str, Any]:
+    status_url = _absolute_url(base_url, f"/v1/briefings/{job_id}")
+    result_url = _absolute_url(base_url, f"/v1/briefings/{job_id}/result")
+    result: dict[str, Any] = {
+        "success": True,
+        "job_id": job_id,
+        "renderer_base_url": base_url,
+        "status_url": status_url,
+        "result_url": result_url,
+    }
+
+    deadline = time.monotonic() + max_wait_seconds
+    while True:
+        status_response = client.get(status_url, headers=_headers())
+        _raise_for_error_response(status_response, "Briefing renderer job status lookup failed.")
+        status_payload = status_response.json()
+        result["status"] = status_payload.get("status", result.get("status", "processing"))
+        for key in (
+            "briefing_id",
+            "created_at",
+            "completed_at",
+            "heartbeat_at",
+            "stage",
+            "progress_percent",
+            "progress_detail",
+            "sentence_total",
+            "sentence_completed",
+            "manifest_path",
+            "asset_count",
+            "request_sha256",
+        ):
+            if key in status_payload:
+                result[key] = status_payload.get(key)
+        if status_payload.get("validation") is not None:
+            result["validation"] = status_payload.get("validation")
+        if status_payload.get("error"):
+            result["error"] = status_payload["error"]
+
+        if result["status"] == "completed":
+            result_response = client.get(result_url, headers=_headers())
+            _raise_for_error_response(result_response, "Briefing renderer result lookup failed.")
+            result["result"] = _build_summary(result_response.json(), base_url)
+            return result
+
+        if result["status"] == "failed" or not wait_for_completion:
+            return result
+
+        if time.monotonic() >= deadline:
+            result["poll_after_seconds"] = poll_interval_seconds
+            return result
+
+        if poll_interval_seconds > 0:
+            time.sleep(poll_interval_seconds)
+
+
 def _raise_for_error_response(response: httpx.Response, default_message: str) -> None:
     try:
         response.raise_for_status()
@@ -411,32 +506,16 @@ def create_briefing_tool(args: dict[str, Any], **_kw) -> str:
             if not wait_for_completion:
                 return tool_result(result)
 
-            deadline = time.monotonic() + max_wait_seconds
-            while True:
-                status_response = client.get(status_url, headers=_headers())
-                _raise_for_error_response(status_response, "Briefing renderer job status lookup failed.")
-                status_payload = status_response.json()
-                result["status"] = status_payload.get("status", result["status"])
-                if status_payload.get("validation") is not None:
-                    result["validation"] = status_payload.get("validation")
-                if status_payload.get("error"):
-                    result["error"] = status_payload["error"]
-
-                if result["status"] == "completed":
-                    result_response = client.get(result_url, headers=_headers())
-                    _raise_for_error_response(result_response, "Briefing renderer result lookup failed.")
-                    result["result"] = _build_summary(result_response.json(), base_url)
-                    return tool_result(result)
-
-                if result["status"] == "failed":
-                    return tool_result(result)
-
-                if time.monotonic() >= deadline:
-                    result["poll_after_seconds"] = poll_interval_seconds
-                    return tool_result(result)
-
-                if poll_interval_seconds > 0:
-                    time.sleep(poll_interval_seconds)
+            polled = _poll_briefing_job(
+                client,
+                job_id=job_id,
+                base_url=base_url,
+                wait_for_completion=True,
+                max_wait_seconds=max_wait_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+            result.update(polled)
+            return tool_result(result)
 
     except RuntimeError as exc:
         return tool_error(str(exc), success=False, renderer_base_url=base_url)
@@ -448,6 +527,39 @@ def create_briefing_tool(args: dict[str, Any], **_kw) -> str:
         )
 
 
+def poll_briefing_status_tool(args: dict[str, Any], **_kw) -> str:
+    job_id = str(args.get("job_id") or "").strip()
+    if not job_id:
+        return tool_error("job_id is required.", success=False)
+
+    base_url = _resolve_renderer_base_url()
+    timeout = _resolve_request_timeout_seconds()
+    wait_for_completion = bool(args.get("wait_for_completion", True))
+    max_wait_seconds = _resolve_max_wait_seconds(args)
+    poll_interval_seconds = _resolve_poll_interval_seconds(args)
+
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            result = _poll_briefing_job(
+                client,
+                job_id=job_id,
+                base_url=base_url,
+                wait_for_completion=wait_for_completion,
+                max_wait_seconds=max_wait_seconds,
+                poll_interval_seconds=poll_interval_seconds,
+            )
+            return tool_result(result)
+    except RuntimeError as exc:
+        return tool_error(str(exc), success=False, renderer_base_url=base_url, job_id=job_id)
+    except httpx.HTTPError as exc:
+        return tool_error(
+            f"Briefing renderer request failed: {exc}",
+            success=False,
+            renderer_base_url=base_url,
+            job_id=job_id,
+        )
+
+
 registry.register(
     name="create_briefing",
     toolset="briefing",
@@ -456,5 +568,17 @@ registry.register(
     check_fn=check_briefing_requirements,
     requires_env=["BRIEFING_RENDERER_SERVICE_TOKEN"],
     description="Render a structured multimedia briefing via the briefing renderer service.",
+    emoji="🗞️",
+)
+
+
+registry.register(
+    name="poll_briefing_status",
+    toolset="briefing",
+    schema=POLL_BRIEFING_STATUS_SCHEMA,
+    handler=poll_briefing_status_tool,
+    check_fn=check_briefing_requirements,
+    requires_env=["BRIEFING_RENDERER_SERVICE_TOKEN"],
+    description="Poll an existing briefing renderer job until it completes or returns its current progress.",
     emoji="🗞️",
 )

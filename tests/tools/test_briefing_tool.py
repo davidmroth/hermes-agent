@@ -7,7 +7,7 @@ import uuid
 
 import httpx
 
-from tools.briefing_tool import check_briefing_requirements, create_briefing_tool
+from tools.briefing_tool import check_briefing_requirements, create_briefing_tool, poll_briefing_status_tool
 
 
 _REAL_HTTPX_CLIENT = httpx.Client
@@ -266,3 +266,119 @@ def test_check_briefing_requirements_uses_health_probe(monkeypatch):
     monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
 
     assert check_briefing_requirements() is True
+
+
+def test_poll_briefing_status_waits_for_completion_and_fetches_result(monkeypatch):
+    status_payload = {
+        "job_id": "job-789",
+        "briefing_id": "market-open-20260513-081500",
+        "status": "completed",
+        "stage": "completed",
+        "progress_percent": 100,
+        "progress_detail": "Briefing ready.",
+        "sentence_total": 12,
+        "sentence_completed": 12,
+        "created_at": "2026-05-13T08:15:00+00:00",
+        "completed_at": "2026-05-13T08:16:20+00:00",
+        "heartbeat_at": "2026-05-13T08:16:20+00:00",
+        "manifest_path": "briefing.json",
+        "asset_count": 5,
+        "request_sha256": "abc123",
+        "validation": {"valid": True, "warnings": [], "errors": []},
+    }
+    result_payload = {
+        "schema_version": "briefing-renderer/v1",
+        "render_mode": "synthetic-v1",
+        "job_id": "job-789",
+        "briefing_id": "market-open-20260513-081500",
+        "title": "Market Open Briefing",
+        "topic": "Pre-market macro setup",
+        "summary": "A short pre-open overview.",
+        "generated_at": "2026-05-13T08:16:20+00:00",
+        "locale": "en-US",
+        "generated_by": "hermes",
+        "manifest_path": "briefing.json",
+        "asset_base_path": "/v1/briefings/job-789/assets",
+        "standalone_html_path": "briefing.html",
+        "audio_path": "audio.mp3",
+        "sections": [],
+        "sources": [],
+        "timeline_cues": [],
+        "assets": [
+            {"role": "audio", "path": "audio.mp3", "content_type": "audio/mpeg", "size_bytes": 12, "sha256": "a", "cache_control": "private, max-age=300"},
+            {"role": "standalone_html", "path": "briefing.html", "content_type": "text/html", "size_bytes": 12, "sha256": "b", "cache_control": "private, max-age=300"},
+        ],
+        "validation": {"valid": True, "warnings": [], "errors": []},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v1/briefings/job-789":
+            return httpx.Response(200, json=status_payload)
+        if request.method == "GET" and request.url.path == "/v1/briefings/job-789/result":
+            return httpx.Response(200, json=result_payload)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(
+        "tools.briefing_tool.load_config",
+        lambda: {
+            "briefing": {
+                "renderer_base_url": "http://renderer.test",
+                "request_timeout_seconds": 5,
+                "poll_interval_seconds": 0,
+                "max_wait_seconds": 15,
+            }
+        },
+    )
+    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+
+    result = json.loads(poll_briefing_status_tool({"job_id": "job-789"}))
+
+    assert result["success"] is True
+    assert result["status"] == "completed"
+    assert result["stage"] == "completed"
+    assert result["result"]["audio_url"] == "http://renderer.test/v1/briefings/job-789/assets/audio.mp3"
+    assert result["result"]["webui_preview_path"] == "/briefings/job-789/player"
+
+
+def test_poll_briefing_status_returns_in_progress_status_without_waiting(monkeypatch):
+    status_payload = {
+        "job_id": "job-456",
+        "briefing_id": "ops-briefing-20260513-090000",
+        "status": "processing",
+        "stage": "rendering_narration",
+        "progress_percent": 42,
+        "progress_detail": "Rendering narration sentence 5 of 12.",
+        "sentence_total": 12,
+        "sentence_completed": 5,
+        "created_at": "2026-05-13T09:00:00+00:00",
+        "completed_at": None,
+        "heartbeat_at": "2026-05-13T09:00:30+00:00",
+        "asset_count": 0,
+        "request_sha256": "def456",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v1/briefings/job-456":
+            return httpx.Response(200, json=status_payload)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(
+        "tools.briefing_tool.load_config",
+        lambda: {
+            "briefing": {
+                "renderer_base_url": "http://renderer.test",
+                "request_timeout_seconds": 5,
+                "poll_interval_seconds": 0,
+                "max_wait_seconds": 15,
+            }
+        },
+    )
+    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+
+    result = json.loads(poll_briefing_status_tool({"job_id": "job-456", "wait_for_completion": False}))
+
+    assert result["success"] is True
+    assert result["status"] == "processing"
+    assert result["stage"] == "rendering_narration"
+    assert result["progress_percent"] == 42
+    assert result["result_url"] == "http://renderer.test/v1/briefings/job-456/result"

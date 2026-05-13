@@ -32,7 +32,7 @@ _HERMES_CORE_TOOLS = [
     # Web
     "web_search", "web_extract",
     # Briefing renderer
-    "create_briefing",
+    "create_briefing", "poll_briefing_status",
     # Terminal + process management
     "terminal", "process",
     # File manipulation
@@ -172,7 +172,7 @@ TOOLSETS = {
 
     "briefing": {
         "description": "Structured multimedia briefing rendering via the briefing renderer service",
-        "tools": ["create_briefing"],
+        "tools": ["create_briefing", "poll_briefing_status"],
         "includes": []
     },
     
