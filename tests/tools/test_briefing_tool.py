@@ -7,7 +7,7 @@ import uuid
 
 import httpx
 
-from tools.briefing_tool import check_briefing_requirements, create_briefing_tool, poll_briefing_status_tool
+from plugins.briefing import check_briefing_requirements, create_briefing_tool, poll_briefing_status_tool
 
 
 _REAL_HTTPX_CLIENT = httpx.Client
@@ -78,7 +78,7 @@ def test_create_briefing_waits_for_completion_and_returns_preview(monkeypatch):
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     monkeypatch.setattr(
-        "tools.briefing_tool.load_config",
+        "plugins.briefing.load_config",
         lambda: {
             "briefing": {
                 "renderer_base_url": "http://renderer.test",
@@ -88,7 +88,7 @@ def test_create_briefing_waits_for_completion_and_returns_preview(monkeypatch):
             }
         },
     )
-    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setattr("plugins.briefing.httpx.Client", _client_factory(httpx.MockTransport(handler)))
     monkeypatch.setenv("BRIEFING_RENDERER_SERVICE_TOKEN", "token-123")
 
     result = json.loads(
@@ -141,10 +141,10 @@ def test_create_briefing_returns_clear_auth_error(monkeypatch):
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     monkeypatch.setattr(
-        "tools.briefing_tool.load_config",
+        "plugins.briefing.load_config",
         lambda: {"briefing": {"renderer_base_url": "http://renderer.test", "request_timeout_seconds": 5}},
     )
-    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setattr("plugins.briefing.httpx.Client", _client_factory(httpx.MockTransport(handler)))
     monkeypatch.delenv("BRIEFING_RENDERER_SERVICE_TOKEN", raising=False)
 
     result = json.loads(
@@ -219,7 +219,7 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     monkeypatch.setattr(
-        "tools.briefing_tool.load_config",
+        "plugins.briefing.load_config",
         lambda: {
             "briefing": {
                 "renderer_base_url": "http://renderer.test",
@@ -229,7 +229,7 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
             }
         },
     )
-    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setattr("plugins.briefing.httpx.Client", _client_factory(httpx.MockTransport(handler)))
 
     result = json.loads(
         create_briefing_tool(
@@ -260,10 +260,10 @@ def test_check_briefing_requirements_uses_health_probe(monkeypatch):
         return httpx.Response(200, json={"status": "ok"})
 
     monkeypatch.setattr(
-        "tools.briefing_tool.load_config",
+        "plugins.briefing.load_config",
         lambda: {"briefing": {"renderer_base_url": "http://renderer.test", "request_timeout_seconds": 5}},
     )
-    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setattr("plugins.briefing.httpx.Client", _client_factory(httpx.MockTransport(handler)))
 
     assert check_briefing_requirements() is True
 
@@ -319,7 +319,7 @@ def test_poll_briefing_status_waits_for_completion_and_fetches_result(monkeypatc
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     monkeypatch.setattr(
-        "tools.briefing_tool.load_config",
+        "plugins.briefing.load_config",
         lambda: {
             "briefing": {
                 "renderer_base_url": "http://renderer.test",
@@ -329,7 +329,7 @@ def test_poll_briefing_status_waits_for_completion_and_fetches_result(monkeypatc
             }
         },
     )
-    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setattr("plugins.briefing.httpx.Client", _client_factory(httpx.MockTransport(handler)))
 
     result = json.loads(poll_briefing_status_tool({"job_id": "job-789"}))
 
@@ -363,7 +363,7 @@ def test_poll_briefing_status_returns_in_progress_status_without_waiting(monkeyp
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
     monkeypatch.setattr(
-        "tools.briefing_tool.load_config",
+        "plugins.briefing.load_config",
         lambda: {
             "briefing": {
                 "renderer_base_url": "http://renderer.test",
@@ -373,7 +373,7 @@ def test_poll_briefing_status_returns_in_progress_status_without_waiting(monkeyp
             }
         },
     )
-    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setattr("plugins.briefing.httpx.Client", _client_factory(httpx.MockTransport(handler)))
 
     result = json.loads(poll_briefing_status_tool({"job_id": "job-456", "wait_for_completion": False}))
 

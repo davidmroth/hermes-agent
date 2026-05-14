@@ -89,6 +89,20 @@ def _make_plugin_dir(base: Path, name: str, *, register_body: str = "pass",
 class TestPluginDiscovery:
     """Tests for plugin discovery from directories and entry points."""
 
+    def test_bundled_briefing_backend_auto_loads(self, tmp_path, monkeypatch):
+        """The bundled briefing backend should load without plugins.enabled."""
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))
+
+        mgr = PluginManager()
+        mgr.discover_and_load(force=True)
+
+        assert "briefing" in mgr._plugins
+        plugin = mgr._plugins["briefing"]
+        assert plugin.enabled
+        assert plugin.manifest.source == "bundled"
+        assert plugin.manifest.kind == "backend"
+        assert set(plugin.tools_registered) >= {"create_briefing", "poll_briefing_status"}
+
     def test_discover_user_plugins(self, tmp_path, monkeypatch):
         """Plugins in ~/.hermes/plugins/ are discovered."""
         plugins_dir = tmp_path / "hermes_test" / "plugins"
