@@ -21,7 +21,7 @@ services:
       - .data/hermes:/opt/data
       - .data/hermes/.venv:/opt/hermes/.venv
       - ./.services/agentlens/plugin:/opt/data/plugins/agentlens
-      - ./.services/briefing/plugin:/opt/hermes/plugins/briefing
+      - ./.services/briefing-service/plugin:/opt/hermes/plugins/rendered-briefing
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py
