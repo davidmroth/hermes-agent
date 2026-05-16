@@ -19,9 +19,12 @@ services:
     volumes:
       - .data/hermes:/opt/data
       - .data/hermes/.venv:/opt/hermes/.venv
+      # Custom integrations and plugins — mount these read-only from the host for hot-reload during development.
       - ./.services/agentlens:/opt/agentlens:ro
       - ./.services/agentlens/plugin:/opt/data/plugins/agentlens:ro
       - ./.services/briefing-service/plugin:/opt/data/plugins/briefing:ro
+      - ./.misc/hermes-themes/dashboard-theme/theme/task-management.yaml:/opt/data/dashboard-themes/task-management.yaml:ro
+      - ./.misc/hermes-themes/dashboard-theme/dashboard:/opt/data/plugins/task-management-dashboard:ro
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py
