@@ -9,7 +9,6 @@ services:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
       - CAMOFOX_URL=http://camofox:9377
-      - PYTHONPATH=/workspace:/opt/hermes:/opt/agentlens
       - AGENTLENS_SERVER_URL=http://agentlens:8500
       # Hindsight memory — local_external mode pointing at the hindsight service
       - HINDSIGHT_MODE=local_external
@@ -22,6 +21,7 @@ services:
       - .data/hermes/.venv:/opt/hermes/.venv
       - ./.services/agentlens:/opt/agentlens:ro
       - ./.services/agentlens/plugin:/opt/data/plugins/agentlens:ro
+      - ./.services/briefing-service/plugin:/opt/data/plugins/briefing:ro
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
       - ./model_tools.py:/opt/hermes/model_tools.py

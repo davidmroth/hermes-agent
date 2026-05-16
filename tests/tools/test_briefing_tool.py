@@ -7,7 +7,12 @@ import uuid
 
 import httpx
 
-from tools.briefing_tool import check_briefing_requirements, create_briefing_tool
+from tools.briefing_tool import (
+    check_briefing_requirements,
+    create_briefing_tool,
+    list_recent_briefings_tool,
+    regenerate_briefing_tool,
+)
 
 
 _REAL_HTTPX_CLIENT = httpx.Client
@@ -90,6 +95,7 @@ def test_create_briefing_waits_for_completion_and_returns_preview(monkeypatch):
     )
     monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
     monkeypatch.setenv("BRIEFING_RENDERER_SERVICE_TOKEN", "token-123")
+    monkeypatch.setenv("WEBCHAT_PUBLIC_BASE_URL", "https://briefings.example.com")
 
     result = json.loads(
         create_briefing_tool(
@@ -124,6 +130,8 @@ def test_create_briefing_waits_for_completion_and_returns_preview(monkeypatch):
     assert result["job_id"] == "job-123"
     assert result["result"]["webui_preview_path"] == "/briefings/job-123/player"
     assert result["result"]["webui_standalone_html_path"] == "/briefings/job-123"
+    assert result["result"]["webui_preview_url"] == "https://briefings.example.com/briefings/job-123/player"
+    assert result["result"]["webui_standalone_html_url"] == "https://briefings.example.com/briefings/job-123"
     assert result["result"]["audio_url"] == "http://renderer.test/v1/briefings/job-123/assets/narration.wav"
     assert captured_request["headers"]["authorization"] == "Bearer token-123"
     assert captured_request["json"]["briefing_id"].startswith("shipping-risk-briefing-")
@@ -249,6 +257,83 @@ def test_create_briefing_derives_stable_job_id_from_briefing_id(monkeypatch):
     assert result["success"] is True
     assert result["job_id"] == expected_job_id
     assert captured_request["json"]["job_id"] == expected_job_id
+
+
+def test_list_recent_briefings_returns_newest_jobs_first(monkeypatch):
+    history_payload = [
+        {
+            "job_id": "job-older",
+            "briefing_id": "briefing-older",
+            "status": "failed",
+            "stage": "render",
+            "created_at": "2026-05-02T12:00:00+00:00",
+            "completed_at": "2026-05-02T12:01:00+00:00",
+            "error": "Renderer timeout",
+            "asset_count": 0,
+        },
+        {
+            "job_id": "job-newer",
+            "briefing_id": "briefing-newer",
+            "status": "completed",
+            "stage": "publish",
+            "created_at": "2026-05-03T12:00:00+00:00",
+            "completed_at": "2026-05-03T12:01:00+00:00",
+            "asset_count": 4,
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v1/briefings":
+            return httpx.Response(200, json=history_payload)
+        if request.method == "GET" and request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(
+        "tools.briefing_tool.load_config",
+        lambda: {"briefing": {"renderer_base_url": "http://renderer.test", "request_timeout_seconds": 5}},
+    )
+    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setenv("WEBCHAT_PUBLIC_BASE_URL", "https://briefings.example.com")
+
+    result = json.loads(list_recent_briefings_tool({"limit": 1}))
+
+    assert result["success"] is True
+    assert result["recent_count"] == 1
+    assert result["total_count"] == 2
+    assert result["jobs"][0]["job_id"] == "job-newer"
+    assert result["jobs"][0]["webui_preview_url"] == "https://briefings.example.com/briefings/job-newer/player"
+
+
+def test_regenerate_briefing_returns_new_job_with_webui_urls(monkeypatch):
+    accepted = {
+        "job_id": "job-regenerated",
+        "status": "processing",
+        "status_url": "/v1/briefings/job-regenerated",
+        "result_url": "/v1/briefings/job-regenerated/result",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/briefings/job-failed/regenerate":
+            return httpx.Response(202, json=accepted)
+        if request.method == "GET" and request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    monkeypatch.setattr(
+        "tools.briefing_tool.load_config",
+        lambda: {"briefing": {"renderer_base_url": "http://renderer.test", "request_timeout_seconds": 5}},
+    )
+    monkeypatch.setattr("tools.briefing_tool.httpx.Client", _client_factory(httpx.MockTransport(handler)))
+    monkeypatch.setenv("WEBCHAT_PUBLIC_BASE_URL", "https://briefings.example.com")
+
+    result = json.loads(regenerate_briefing_tool({"job_id": "job-failed"}))
+
+    assert result["success"] is True
+    assert result["original_job_id"] == "job-failed"
+    assert result["job_id"] == "job-regenerated"
+    assert result["webui_preview_url"] == "https://briefings.example.com/briefings/job-regenerated/player"
+    assert result["webui_standalone_html_url"] == "https://briefings.example.com/briefings/job-regenerated"
 
 
 def test_check_briefing_requirements_uses_health_probe(monkeypatch):

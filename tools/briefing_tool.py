@@ -16,6 +16,11 @@ from hermes_cli.config import load_config
 from hermes_constants import is_container
 from tools.registry import registry, tool_error, tool_result
 
+try:
+    from gateway.session_context import get_session_env as _get_session_env
+except Exception:
+    _get_session_env = None
+
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -155,6 +160,43 @@ CREATE_BRIEFING_SCHEMA = {
 }
 
 
+LIST_RECENT_BRIEFINGS_SCHEMA = {
+    "name": "list_recent_briefings",
+    "description": (
+        "List the most recent briefing jobs across all statuses. "
+        "Use this to inspect recent successes, active jobs, and failures before polling or regenerating a specific job."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of recent jobs to return. Defaults to 10.",
+            },
+        },
+    },
+}
+
+
+REGENERATE_BRIEFING_SCHEMA = {
+    "name": "regenerate_briefing",
+    "description": (
+        "Re-submit a previously generated briefing job by job_id. "
+        "Use this to regenerate failed or outdated jobs without rebuilding the original request payload manually."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "job_id": {
+                "type": "string",
+                "description": "Existing renderer job id to regenerate.",
+            },
+        },
+        "required": ["job_id"],
+    },
+}
+
+
 def _briefing_config() -> dict[str, Any]:
     return (load_config() or {}).get("briefing", {}) or {}
 
@@ -232,6 +274,75 @@ def _asset_url(base_url: str, job_id: str, asset_path: str) -> str:
     return _absolute_url(base_url, f"/v1/briefings/{job_id}/assets/{asset_path.lstrip('/')}")
 
 
+def _resolve_webui_public_base_url() -> str:
+    if _get_session_env is not None:
+        try:
+            session_base_url = str(_get_session_env("HERMES_SESSION_PUBLIC_BASE_URL", "") or "").strip()
+        except Exception:
+            session_base_url = ""
+        if session_base_url:
+            return session_base_url.rstrip("/")
+
+    env_override = os.getenv("WEBCHAT_PUBLIC_BASE_URL", "").strip()
+    if env_override:
+        return env_override.rstrip("/")
+    return ""
+
+
+def _add_webui_urls(payload: dict[str, Any], job_id: str) -> dict[str, Any]:
+    public_base_url = _resolve_webui_public_base_url()
+    if not public_base_url:
+        return payload
+
+    preview_path = str(payload.get("webui_preview_path") or f"/briefings/{job_id}/player")
+    standalone_path = str(payload.get("webui_standalone_html_path") or f"/briefings/{job_id}")
+    manifest_path = str(payload.get("webui_manifest_path") or f"/briefings/{job_id}/manifest")
+    asset_base_path = str(payload.get("webui_asset_base_path") or f"/briefings/{job_id}/assets")
+
+    payload["webui_preview_url"] = _absolute_url(public_base_url, preview_path)
+    payload["webui_standalone_html_url"] = _absolute_url(public_base_url, standalone_path)
+    payload["webui_manifest_url"] = _absolute_url(public_base_url, manifest_path)
+    payload["webui_asset_base_url"] = _absolute_url(public_base_url, asset_base_path)
+    return payload
+
+
+def _normalize_recent_limit(raw_limit: Any) -> int:
+    try:
+        return min(50, max(1, int(raw_limit or 10)))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _status_sort_key(job: dict[str, Any]) -> tuple[str, str]:
+    return (
+        str(job.get("created_at") or ""),
+        str(job.get("job_id") or ""),
+    )
+
+
+def _build_job_status_summary(job: dict[str, Any]) -> dict[str, Any]:
+    job_id = str(job.get("job_id") or "").strip()
+    summary = {
+        "job_id": job_id,
+        "briefing_id": job.get("briefing_id"),
+        "status": job.get("status"),
+        "stage": job.get("stage"),
+        "progress_percent": job.get("progress_percent"),
+        "progress_detail": job.get("progress_detail"),
+        "created_at": job.get("created_at"),
+        "completed_at": job.get("completed_at"),
+        "heartbeat_at": job.get("heartbeat_at"),
+        "error": job.get("error"),
+        "asset_count": job.get("asset_count", 0),
+        "validation": job.get("validation"),
+        "webui_preview_path": f"/briefings/{job_id}/player",
+        "webui_standalone_html_path": f"/briefings/{job_id}",
+        "webui_manifest_path": f"/briefings/{job_id}/manifest",
+        "webui_asset_base_path": f"/briefings/{job_id}/assets",
+    }
+    return _add_webui_urls(summary, job_id)
+
+
 def _coerce_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -305,6 +416,8 @@ def _build_summary(result: dict[str, Any], base_url: str) -> dict[str, Any]:
         "source_count": len(result.get("sources") or []),
         "validation": result.get("validation") or {"valid": True, "warnings": [], "errors": []},
         "asset_urls": asset_urls,
+        "webui_manifest_path": f"/briefings/{job_id}/manifest",
+        "webui_asset_base_path": f"/briefings/{job_id}/assets",
         "webui_preview_path": f"/briefings/{job_id}/player",
         "webui_standalone_html_path": f"/briefings/{job_id}",
     }
@@ -317,7 +430,7 @@ def _build_summary(result: dict[str, Any], base_url: str) -> dict[str, Any]:
         summary["audio_url"] = _asset_url(base_url, job_id, audio_path)
     if standalone_html_path:
         summary["standalone_html_url"] = _asset_url(base_url, job_id, standalone_html_path)
-    return summary
+    return _add_webui_urls(summary, job_id)
 
 
 def _raise_for_error_response(response: httpx.Response, default_message: str) -> None:
@@ -392,9 +505,12 @@ def create_briefing_tool(args: dict[str, Any], **_kw) -> str:
                 "renderer_base_url": base_url,
                 "status_url": status_url,
                 "result_url": result_url,
+                "webui_manifest_path": f"/briefings/{job_id}/manifest",
+                "webui_asset_base_path": f"/briefings/{job_id}/assets",
                 "webui_preview_path": f"/briefings/{job_id}/player",
                 "webui_standalone_html_path": f"/briefings/{job_id}",
             }
+            _add_webui_urls(result, job_id)
 
             if not wait_for_completion:
                 return tool_result(result)
@@ -436,6 +552,91 @@ def create_briefing_tool(args: dict[str, Any], **_kw) -> str:
         )
 
 
+def list_recent_briefings_tool(args: dict[str, Any], **_kw) -> str:
+    base_url = _resolve_renderer_base_url()
+    timeout = _resolve_request_timeout_seconds()
+    limit = _normalize_recent_limit(args.get("limit"))
+
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.get(
+                _absolute_url(base_url, "/v1/briefings"),
+                headers=_headers(),
+            )
+            _raise_for_error_response(response, "Briefing renderer history lookup failed.")
+            payload = response.json()
+    except RuntimeError as exc:
+        return tool_error(str(exc), success=False, renderer_base_url=base_url)
+    except httpx.HTTPError as exc:
+        return tool_error(
+            f"Briefing renderer request failed: {exc}",
+            success=False,
+            renderer_base_url=base_url,
+        )
+
+    jobs = payload if isinstance(payload, list) else []
+    recent_jobs = [
+        _build_job_status_summary(job)
+        for job in sorted(
+            (job for job in jobs if isinstance(job, dict)),
+            key=_status_sort_key,
+            reverse=True,
+        )[:limit]
+    ]
+    return tool_result(
+        {
+            "success": True,
+            "renderer_base_url": base_url,
+            "recent_count": len(recent_jobs),
+            "total_count": len(jobs),
+            "jobs": recent_jobs,
+        }
+    )
+
+
+def regenerate_briefing_tool(args: dict[str, Any], **_kw) -> str:
+    original_job_id = str(args.get("job_id") or "").strip()
+    if not original_job_id:
+        return tool_error("job_id is required.", success=False)
+
+    base_url = _resolve_renderer_base_url()
+    timeout = _resolve_request_timeout_seconds()
+
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            response = client.post(
+                _absolute_url(base_url, f"/v1/briefings/{original_job_id}/regenerate"),
+                headers=_headers(),
+            )
+            _raise_for_error_response(response, "Briefing renderer regenerate request failed.")
+            accepted = response.json()
+    except RuntimeError as exc:
+        return tool_error(str(exc), success=False, renderer_base_url=base_url, job_id=original_job_id)
+    except httpx.HTTPError as exc:
+        return tool_error(
+            f"Briefing renderer request failed: {exc}",
+            success=False,
+            renderer_base_url=base_url,
+            job_id=original_job_id,
+        )
+
+    job_id = str(accepted.get("job_id") or "").strip()
+    result = {
+        "success": True,
+        "original_job_id": original_job_id,
+        "job_id": job_id,
+        "status": accepted.get("status", "processing"),
+        "renderer_base_url": base_url,
+        "status_url": _absolute_url(base_url, accepted.get("status_url") or f"/v1/briefings/{job_id}"),
+        "result_url": _absolute_url(base_url, accepted.get("result_url") or f"/v1/briefings/{job_id}/result"),
+        "webui_manifest_path": f"/briefings/{job_id}/manifest",
+        "webui_asset_base_path": f"/briefings/{job_id}/assets",
+        "webui_preview_path": f"/briefings/{job_id}/player",
+        "webui_standalone_html_path": f"/briefings/{job_id}",
+    }
+    return tool_result(_add_webui_urls(result, job_id))
+
+
 registry.register(
     name="create_briefing",
     toolset="briefing",
@@ -444,5 +645,27 @@ registry.register(
     check_fn=check_briefing_requirements,
     requires_env=["BRIEFING_RENDERER_SERVICE_TOKEN"],
     description="Render a structured multimedia briefing via the briefing renderer service.",
+    emoji="🗞️",
+)
+
+registry.register(
+    name="list_recent_briefings",
+    toolset="briefing",
+    schema=LIST_RECENT_BRIEFINGS_SCHEMA,
+    handler=list_recent_briefings_tool,
+    check_fn=check_briefing_requirements,
+    requires_env=["BRIEFING_RENDERER_SERVICE_TOKEN"],
+    description="List recent briefing jobs across all statuses.",
+    emoji="🗞️",
+)
+
+registry.register(
+    name="regenerate_briefing",
+    toolset="briefing",
+    schema=REGENERATE_BRIEFING_SCHEMA,
+    handler=regenerate_briefing_tool,
+    check_fn=check_briefing_requirements,
+    requires_env=["BRIEFING_RENDERER_SERVICE_TOKEN"],
+    description="Regenerate a prior briefing job by job_id.",
     emoji="🗞️",
 )

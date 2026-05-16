@@ -53,6 +53,7 @@ def test_fetch_event_does_not_ack_before_processing():
                 "eventId": "evt-123",
                 "conversationId": "conv-1",
                 "contextUrl": "/api/internal/hermes/conversations/conv-1/context",
+                "publicBaseUrl": "https://briefings.example.com",
                 "chatType": "dm",
                 "userId": "user-1",
                 "text": "hello",
@@ -69,6 +70,7 @@ def test_fetch_event_does_not_ack_before_processing():
     assert event.message_type is MessageType.TEXT
     assert event.source.chat_id == "conv-1"
     assert event.raw_message["contextUrl"] == "http://webui:3000/api/internal/hermes/conversations/conv-1/context"
+    assert event.raw_message["publicBaseUrl"] == "https://briefings.example.com"
     adapter._ack_event.assert_not_called()
 
 
@@ -155,6 +157,7 @@ def test_build_webchat_context_transcript_uses_visible_branch_and_excludes_curre
     payload = {
         "schemaVersion": 1,
         "exportedAt": "2026-04-25T12:00:00.000Z",
+        "publicBaseUrl": "https://briefings.example.com",
         "conversation": {
             "id": "conv-1",
             "currNode": "assistant-2",
@@ -203,6 +206,7 @@ def test_build_webchat_context_transcript_uses_visible_branch_and_excludes_curre
 
     assert transcript[0]["role"] == "session_meta"
     assert transcript[0]["webchat_context"] == build_webchat_context_marker(payload)
+    assert transcript[0]["webchat_context"]["publicBaseUrl"] == "https://briefings.example.com"
     assert [message["role"] for message in transcript[1:]] == ["user", "assistant", "assistant"]
     assert [message["content"] for message in transcript[1:]] == [
         "Earlier question",

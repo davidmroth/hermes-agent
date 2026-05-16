@@ -99,13 +99,18 @@ def _normalize_webchat_context_marker(raw: Any) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         schema_version = 0
 
-    return {
+    public_base_url = str(raw.get("publicBaseUrl") or "").strip() or None
+
+    marker = {
         "schemaVersion": schema_version,
         "conversationId": conversation_id,
         "currNode": curr_node,
         "lastModified": last_modified,
         "visibleMessageIds": visible_message_ids,
     }
+    if public_base_url:
+        marker["publicBaseUrl"] = public_base_url
+    return marker
 
 
 def build_webchat_context_marker(context_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -116,6 +121,7 @@ def build_webchat_context_marker(context_payload: Dict[str, Any]) -> Optional[Di
     return _normalize_webchat_context_marker(
         {
             "schemaVersion": context_payload.get("schemaVersion"),
+            "publicBaseUrl": context_payload.get("publicBaseUrl"),
             "conversationId": conversation.get("id"),
             "currNode": conversation.get("currNode"),
             "lastModified": conversation.get("lastModified"),
