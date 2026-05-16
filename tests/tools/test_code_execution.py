@@ -658,6 +658,13 @@ class TestBuildExecuteCodeSchema(unittest.TestCase):
         self.assertIn("shell_quote", desc)
         self.assertIn("retry", desc)
 
+    def test_description_warns_that_secrets_are_scrubbed(self):
+        schema = build_execute_code_schema()
+        desc = schema["description"]
+        self.assertIn("does NOT receive secrets", desc)
+        self.assertIn("Do NOT use execute_code to check whether auth tokens are configured", desc)
+        self.assertIn("not shell commands", desc)
+
     def test_none_defaults_to_all_tools(self):
         schema_none = build_execute_code_schema(None)
         schema_all = build_execute_code_schema(SANDBOX_ALLOWED_TOOLS)
