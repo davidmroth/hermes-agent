@@ -129,6 +129,7 @@ customCSS: |
   }
 
   :root[data-layout-variant="cockpit"] aside {
+    box-sizing: border-box;
     margin-top: 0.25rem;
     margin-bottom: 1rem;
     border: 1px solid rgba(121, 136, 164, 0.2);

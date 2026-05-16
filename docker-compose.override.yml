@@ -23,7 +23,8 @@ services:
       - ./.services/agentlens:/opt/agentlens:ro
       - ./.services/agentlens/plugin:/opt/data/plugins/agentlens:ro
       - ./.services/briefing-service/plugin:/opt/data/plugins/briefing:ro
-      - ./.misc/hermes-themes/dashboard-theme/theme/task-management.yaml:/opt/data/dashboard-themes/task-management.yaml:ro
+      # Mouting doesn't work for the for the follow, so I manually copy them into the container and restart it when I make changes. TODO: figure out why.
+      #- ./.misc/hermes-themes/dashboard-theme/theme/task-management.yaml:/opt/data/dashboard-themes/task-management.yaml:ro
       - ./.misc/hermes-themes/dashboard-theme/dashboard:/opt/data/plugins/task-management-dashboard:ro
       # --- Hot-reload: mount source directories ---
       - ./run_agent.py:/opt/hermes/run_agent.py
