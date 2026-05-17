@@ -226,10 +226,11 @@ services:
       - KOKORO_VOICE=${KOKORO_TTS_VOICE:-af_sky}
       - KOKORO_LANG=${KOKORO_TTS_LANG:-en-us}
       - KOKORO_SPEED=${KOKORO_TTS_SPEED:-1.0}
-    ports:
-      - "9100:8000"
     volumes:
       - .data/kokoro-tts/cache:/models
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "9100:8000"
     logging:
       driver: "json-file"
       options:
