@@ -93,3 +93,79 @@ def test_tts_keeps_non_english_decimal_text_raw(monkeypatch):
 
     assert response.status_code == 200
     assert captured["text"] == "La valeur est 3.14."
+
+
+def test_individual_pronunciation_update_persists_and_affects_tts(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOKORO_PRONUNCIATIONS_PATH", str(tmp_path / "pronunciations.json"))
+    module = _load_module(monkeypatch)
+    captured: dict[str, object] = {}
+
+    def fake_render(text: str, *, voice: str, lang: str, speed: float) -> bytes:
+        captured["text"] = text
+        return b"wav-bytes"
+
+    monkeypatch.setattr(module, "_render_wav_bytes", fake_render)
+    client = TestClient(module.app)
+
+    update_response = client.post(
+        "/pronunciations",
+        json={"phrase": "Hermes", "pronunciation": "Hur-meez"},
+    )
+
+    assert update_response.status_code == 200
+    assert (tmp_path / "pronunciations.json").read_text() == '{\n  "Hermes": "Hur-meez"\n}\n'
+
+    tts_response = client.post("/tts", data={"text": "Hermes is online.", "lang": "en-us"})
+
+    assert tts_response.status_code == 200
+    assert captured["text"] == "Hur-meez is online."
+
+
+def test_bulk_pronunciation_update_persists_entries(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOKORO_PRONUNCIATIONS_PATH", str(tmp_path / "pronunciations.json"))
+    module = _load_module(monkeypatch)
+    client = TestClient(module.app)
+
+    response = client.post(
+        "/pronunciations/bulk",
+        json={
+            "entries": [
+                {"phrase": "Hermes", "pronunciation": "Hur-meez"},
+                {"phrase": "Kokoro", "pronunciation": "Koh-koh-roh"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["updated"] == 2
+    assert module._load_pronunciations() == {
+        "Hermes": "Hur-meez",
+        "Kokoro": "Koh-koh-roh",
+    }
+
+
+def test_edit_pronunciation_can_rename_phrase(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOKORO_PRONUNCIATIONS_PATH", str(tmp_path / "pronunciations.json"))
+    module = _load_module(monkeypatch)
+    module._save_pronunciations({"Hermes": "Hur-meez"})
+    client = TestClient(module.app)
+
+    response = client.patch(
+        "/pronunciations/Hermes",
+        json={"phrase": "Hermes Agent", "pronunciation": "Hur-meez Ay-jent"},
+    )
+
+    assert response.status_code == 200
+    assert module._load_pronunciations() == {"Hermes Agent": "Hur-meez Ay-jent"}
+
+
+def test_delete_pronunciation_removes_entry(monkeypatch, tmp_path):
+    monkeypatch.setenv("KOKORO_PRONUNCIATIONS_PATH", str(tmp_path / "pronunciations.json"))
+    module = _load_module(monkeypatch)
+    module._save_pronunciations({"Hermes": "Hur-meez"})
+    client = TestClient(module.app)
+
+    response = client.delete("/pronunciations/Hermes")
+
+    assert response.status_code == 200
+    assert module._load_pronunciations() == {}
