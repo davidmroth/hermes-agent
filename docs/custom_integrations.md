@@ -99,6 +99,12 @@ Optional variables:
 - `WEBCHAT_TIMEOUT_SECONDS`
   - HTTP timeout for WebUI health, inbox, download, typing, ack, and assistant-post requests
 
+- `WEBCHAT_RECONNECT_BACKOFF_SECONDS`
+  - Base delay in seconds before retrying a failed poller reconnect
+
+- `WEBCHAT_RECONNECT_MAX_BACKOFF_SECONDS`
+  - Maximum reconnect delay in seconds after repeated poller failures
+
 - `WEBCHAT_PUBLIC_BASE_URL`
   - Public-facing base URL used in outbound message payloads when it differs from the internal URL
 
@@ -149,6 +155,7 @@ All of these are authenticated with:
 9. Hermes posts the assistant reply to `POST /api/internal/hermes/conversations/{conversationId}/assistant`.
 10. Hermes only acks the event after successful processing.
 11. Failed events are intentionally left unacked so the WebUI can retry them.
+12. If poller health, inbox polling, or slash-command verification fails after startup, Hermes closes the current client and reconnects with capped exponential backoff until WebUI is reachable again.
 
 ### Important implementation details
 
@@ -157,6 +164,8 @@ All of these are authenticated with:
 The WebUI does not poll Hermes for slash commands.
 
 Hermes pushes the current gateway-visible command catalog to `POST /api/internal/hermes/commands` during adapter connect, and the WebUI serves that last stored catalog from its own durable cache.
+
+The same verification step now runs again when the poller reconnects after a runtime transport or auth failure, so a recovered webchat session also refreshes the slash-command cache.
 
 If slash commands come back empty in the browser, debug the push path or the receiver-side cache persistence. Do not add a WebUI polling loop as a fallback.
 

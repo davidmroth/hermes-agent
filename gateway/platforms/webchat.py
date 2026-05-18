@@ -48,6 +48,8 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_COMMAND_SYNC_RETRIES = 4
 DEFAULT_COMMAND_SYNC_BACKOFF_SECONDS = 1.0
 DEFAULT_COMMAND_SYNC_MAX_BACKOFF_SECONDS = 8.0
+DEFAULT_RECONNECT_BACKOFF_SECONDS = 1.0
+DEFAULT_RECONNECT_MAX_BACKOFF_SECONDS = 30.0
 
 
 def check_webchat_requirements() -> bool:
@@ -325,6 +327,20 @@ class WebChatAdapter(BasePlatformAdapter):
                 str(DEFAULT_COMMAND_SYNC_MAX_BACKOFF_SECONDS),
             )
         )
+        self._reconnect_backoff_seconds = float(
+            extra.get("reconnect_backoff_seconds")
+            or os.getenv(
+                "WEBCHAT_RECONNECT_BACKOFF_SECONDS",
+                str(DEFAULT_RECONNECT_BACKOFF_SECONDS),
+            )
+        )
+        self._reconnect_max_backoff_seconds = float(
+            extra.get("reconnect_max_backoff_seconds")
+            or os.getenv(
+                "WEBCHAT_RECONNECT_MAX_BACKOFF_SECONDS",
+                str(DEFAULT_RECONNECT_MAX_BACKOFF_SECONDS),
+            )
+        )
         self._poll_task: Optional[asyncio.Task] = None
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -345,6 +361,78 @@ class WebChatAdapter(BasePlatformAdapter):
 
     def _commands_url(self) -> str:
         return f"{self._base_url}/api/internal/hermes/commands"
+
+    async def _open_client(self) -> None:
+        await self._close_client()
+        self._client = httpx.AsyncClient(timeout=self._timeout_seconds)
+
+    async def _close_client(self) -> None:
+        if self._client is None:
+            return
+        await self._client.aclose()
+        self._client = None
+
+    async def _verify_connection(self) -> None:
+        if self._client is None:
+            raise RuntimeError("webchat client is not initialized")
+
+        response = await self._client.get(
+            f"{self._base_url}/api/internal/hermes/health",
+            headers=self._headers(),
+        )
+        response.raise_for_status()
+        await self._sync_slash_commands_with_retry()
+
+    async def _establish_client(self) -> None:
+        await self._open_client()
+        try:
+            await self._verify_connection()
+        except Exception:
+            await self._close_client()
+            raise
+
+    def _is_auth_error(self, exc: Exception) -> bool:
+        if not HTTPX_AVAILABLE or not isinstance(exc, httpx.HTTPStatusError):
+            return False
+        status_code = exc.response.status_code if exc.response is not None else None
+        return status_code in {401, 403}
+
+    async def _reconnect_poll_client(self, exc: Exception) -> bool:
+        await self._close_client()
+        attempt = 0
+        while self.is_connected:
+            attempt += 1
+            try:
+                await self._establish_client()
+                logger.info(
+                    "[%s] Reconnected webchat poller after %s attempt%s",
+                    self.name,
+                    attempt,
+                    "" if attempt == 1 else "s",
+                )
+                return True
+            except asyncio.CancelledError:
+                raise
+            except Exception as reconnect_exc:
+                delay_seconds = min(
+                    self._reconnect_backoff_seconds * (2 ** (attempt - 1)),
+                    self._reconnect_max_backoff_seconds,
+                )
+                log_message = (
+                    "Authentication failed while reconnecting webchat poller"
+                    if self._is_auth_error(reconnect_exc)
+                    else "Failed to reconnect webchat poller"
+                )
+                logger.warning(
+                    "[%s] %s on attempt %s; retrying in %.1fs: %s",
+                    self.name,
+                    log_message,
+                    attempt,
+                    delay_seconds,
+                    reconnect_exc,
+                )
+                await asyncio.sleep(delay_seconds)
+        return False
 
     async def fetch_conversation_context(self, context_url: str) -> Optional[Dict[str, Any]]:
         if self._client is None:
@@ -393,32 +481,10 @@ class WebChatAdapter(BasePlatformAdapter):
             logger.warning("[%s] WEBCHAT_SERVICE_TOKEN is not configured", self.name)
             return False
 
-        self._client = httpx.AsyncClient(timeout=self._timeout_seconds)
         try:
-            response = await self._client.get(
-                f"{self._base_url}/api/internal/hermes/health",
-                headers=self._headers(),
-            )
-            response.raise_for_status()
+            await self._establish_client()
         except Exception as exc:
-            logger.error(
-                "[%s] Failed health check against %s: %s",
-                self.name,
-                self._base_url,
-                exc,
-            )
-            if self._client is not None:
-                await self._client.aclose()
-                self._client = None
-            return False
-
-        try:
-            await self._sync_slash_commands_with_retry()
-        except Exception as exc:
-            logger.error("[%s] Failed to verify slash command sync to webchat: %s", self.name, exc)
-            if self._client is not None:
-                await self._client.aclose()
-                self._client = None
+            logger.error("[%s] Failed to connect to %s: %s", self.name, self._base_url, exc)
             return False
 
         self._mark_connected()
@@ -486,23 +552,31 @@ class WebChatAdapter(BasePlatformAdapter):
             self._poll_task.cancel()
             await asyncio.gather(self._poll_task, return_exceptions=True)
             self._poll_task = None
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        await self._close_client()
         logger.info("[%s] Disconnected", self.name)
 
     async def _poll_loop(self) -> None:
         while self.is_connected:
             try:
                 event = await self._fetch_event()
-                if event is None:
-                    await asyncio.sleep(self._poll_interval)
-                    continue
-                await self.handle_message(event)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.warning("[%s] Poll error: %s", self.name, exc)
+                if not await self._reconnect_poll_client(exc):
+                    break
+                continue
+
+            if event is None:
+                await asyncio.sleep(self._poll_interval)
+                continue
+
+            try:
+                await self.handle_message(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("[%s] Message handling error: %s", self.name, exc)
                 await asyncio.sleep(self._poll_interval)
 
     async def _fetch_event(self) -> Optional[MessageEvent]:

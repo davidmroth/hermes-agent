@@ -33,6 +33,8 @@ services:
     environment:
       - HERMES_UID=${HERMES_UID:-10000}
       - HERMES_GID=${HERMES_GID:-10000}
+      - WEBCHAT_RECONNECT_BACKOFF_SECONDS=${WEBCHAT_RECONNECT_BACKOFF_SECONDS:-1}
+      - WEBCHAT_RECONNECT_MAX_BACKOFF_SECONDS=${WEBCHAT_RECONNECT_MAX_BACKOFF_SECONDS:-30}
       # To expose the OpenAI-compatible API server beyond localhost,
       # uncomment BOTH lines (API_SERVER_KEY is mandatory for auth):
       # - API_SERVER_HOST=0.0.0.0

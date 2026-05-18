@@ -2,6 +2,9 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
+import pytest
+
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import MessageEvent, MessageType, ProcessingOutcome
 from gateway.platforms.webchat import (
@@ -292,6 +295,7 @@ def test_connect_syncs_slash_commands_after_health_check():
     adapter = _build_adapter()
     fake_client = Mock()
     fake_client.get = AsyncMock(return_value=_Response(payload={"ok": True}))
+    fake_client.aclose = AsyncMock()
     fake_task = Mock()
     fake_task.add_done_callback = Mock()
 
@@ -308,6 +312,13 @@ def test_connect_syncs_slash_commands_after_health_check():
 
     assert connected is True
     mock_sync.assert_awaited_once()
+    fake_client.get.assert_awaited_once_with(
+        "http://webui:3000/api/internal/hermes/health",
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Bearer svc-token",
+        },
+    )
 
 
 def test_connect_returns_false_when_slash_command_sync_cannot_be_verified():
@@ -328,6 +339,86 @@ def test_connect_returns_false_when_slash_command_sync_cannot_be_verified():
 
     assert connected is False
     fake_client.aclose.assert_awaited_once()
+
+
+def test_reconnect_poll_client_retries_with_backoff_until_success():
+    adapter = _build_adapter()
+    adapter._mark_connected()
+    old_client = Mock()
+    old_client.aclose = AsyncMock()
+    adapter._client = old_client
+    adapter._reconnect_backoff_seconds = 2.0
+    adapter._reconnect_max_backoff_seconds = 5.0
+
+    sleep_calls = []
+
+    async def _sleep(delay):
+        sleep_calls.append(delay)
+
+    establish = AsyncMock(side_effect=[RuntimeError("offline"), RuntimeError("still offline"), None])
+
+    with (
+        patch.object(adapter, "_establish_client", establish),
+        patch("gateway.platforms.webchat.asyncio.sleep", side_effect=_sleep),
+    ):
+        recovered = asyncio.run(adapter._reconnect_poll_client(RuntimeError("poll failed")))
+
+    assert recovered is True
+    assert sleep_calls == [2.0, 4.0]
+    old_client.aclose.assert_awaited_once()
+
+
+def test_reconnect_poll_client_retries_after_auth_failure():
+    adapter = _build_adapter()
+    adapter._mark_connected()
+    old_client = Mock()
+    old_client.aclose = AsyncMock()
+    adapter._client = old_client
+
+    request = httpx.Request("GET", "http://webui:3000/api/internal/hermes/health")
+    response = httpx.Response(401, request=request)
+    auth_error = httpx.HTTPStatusError("Unauthorized", request=request, response=response)
+
+    sleep_calls = []
+
+    async def _sleep(delay):
+        sleep_calls.append(delay)
+
+    establish = AsyncMock(side_effect=[auth_error, None])
+
+    with (
+        patch.object(adapter, "_establish_client", establish),
+        patch("gateway.platforms.webchat.asyncio.sleep", side_effect=_sleep),
+    ):
+        recovered = asyncio.run(adapter._reconnect_poll_client(auth_error))
+
+    assert recovered is True
+    assert sleep_calls == [1.0]
+    old_client.aclose.assert_awaited_once()
+
+
+def test_poll_loop_reconnects_after_fetch_error_then_resumes_handling():
+    adapter = _build_adapter()
+    adapter._mark_connected()
+    adapter.handle_message = AsyncMock(side_effect=lambda event: adapter._mark_disconnected())
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=adapter.build_source(chat_id="conv-1", user_id="user-1"),
+        raw_message={"eventId": "evt-123"},
+    )
+
+    fetch_event = AsyncMock(side_effect=[RuntimeError("socket closed"), event])
+
+    with (
+        patch.object(adapter, "_fetch_event", fetch_event),
+        patch.object(adapter, "_reconnect_poll_client", AsyncMock(return_value=True)) as reconnect,
+        patch("gateway.platforms.webchat.asyncio.sleep", AsyncMock()),
+    ):
+        asyncio.run(adapter._poll_loop())
+
+    reconnect.assert_awaited_once()
+    adapter.handle_message.assert_awaited_once_with(event)
 
 
 def test_load_history_for_event_ignores_stale_context_version():
