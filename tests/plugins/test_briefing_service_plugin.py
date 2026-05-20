@@ -85,9 +85,11 @@ def test_create_briefing_returns_briefing_url_without_waiting_by_default(monkeyp
     assert result["success"] is True
     assert result["status"] == "processing"
     assert result["job_id"] == "job-123"
-    assert result["webui_preview_url"] == "https://briefings.example.com/briefings/job-123/player"
-    assert result["briefing_path"] == "/briefings/job-123/player"
-    assert result["briefing_url"] == "https://briefings.example.com/briefings/job-123/player"
+    assert result["webui_standalone_html_url"] == "https://briefings.example.com/briefings/job-123"
+    assert result["briefing_path"] == "/briefings/job-123"
+    assert result["briefing_url"] == "https://briefings.example.com/briefings/job-123"
+    assert "webui_preview_url" not in result
+    assert "webui_asset_base_url" not in result
     assert "Open briefing_url" in result["message"]
     assert captured_request["headers"]["authorization"] == "Bearer token-123"
     assert captured_request["json"]["briefing_id"].startswith("shipping-risk-briefing-")
@@ -182,6 +184,9 @@ def test_create_briefing_waits_for_completion_when_requested(monkeypatch):
 
     assert result["success"] is True
     assert result["status"] == "completed"
-    assert result["briefing_url"] == "https://briefings.example.com/briefings/job-123/player"
-    assert result["result"]["webui_preview_url"] == "https://briefings.example.com/briefings/job-123/player"
-    assert result["result"]["audio_url"] == "http://renderer.test/v1/briefings/job-123/assets/narration.wav"
+    assert result["briefing_url"] == "https://briefings.example.com/briefings/job-123"
+    assert result["result"]["webui_standalone_html_url"] == "https://briefings.example.com/briefings/job-123"
+    assert "webui_preview_url" not in result["result"]
+    assert "asset_urls" not in result["result"]
+    assert "audio_url" not in result["result"]
+    assert "manifest_url" not in result["result"]
