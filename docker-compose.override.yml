@@ -221,6 +221,7 @@ services:
     build:
       context: .
       dockerfile: .services/kokoro-tts/Dockerfile
+      target: production
     restart: unless-stopped
     environment:
       - KOKORO_MODEL_DIR=/models
@@ -238,6 +239,26 @@ services:
         max-file: "3"
         max-size: "10m"
 
+
+  # ---------------------------------------------------------------------------
+  # Kokoro TTS Test Suite — Runs the Kokoro TTS text-normalisation tests
+  # Uses the `test` stage from the same multi-stage Dockerfile as production.
+  # No TTS model files needed; only NeMo text-processing is exercised.
+  #
+  # Run with:
+  #   docker compose --profile test run --rm kokoro-tts-test
+  #   docker compose --profile test run --rm kokoro-tts-test python -m pytest tests/ -q --no-header
+  # ---------------------------------------------------------------------------
+  kokoro-tts-test:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: .services/kokoro-tts/Dockerfile
+      target: test
+    environment:
+      - KOKORO_TEXT_NORMALIZATION_BACKEND=auto
+      - KOKORO_MODEL_DIR=/tmp/kokoro-test-models
+      - KOKORO_PRONUNCIATIONS_PATH=/tmp/kokoro-test-pronunciations.json
 
   # ---------------------------------------------------------------------------
   # Briefing Renderer — Renders agent briefings to video with narration
