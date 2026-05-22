@@ -190,3 +190,40 @@ def test_create_briefing_waits_for_completion_when_requested(monkeypatch):
     assert "asset_urls" not in result["result"]
     assert "audio_url" not in result["result"]
     assert "manifest_url" not in result["result"]
+
+
+def test_check_briefing_requirements_true_when_token_set(monkeypatch):
+    """Token present → tools available regardless of renderer reachability."""
+    plugin = _load_plugin_module()
+    monkeypatch.setenv("BRIEFING_RENDERER_SERVICE_TOKEN", "some-token")
+    assert plugin.check_briefing_requirements() is True
+
+
+def test_check_briefing_requirements_false_when_token_absent(monkeypatch):
+    """No token → tools unavailable (plugin not configured)."""
+    plugin = _load_plugin_module()
+    monkeypatch.delenv("BRIEFING_RENDERER_SERVICE_TOKEN", raising=False)
+    assert plugin.check_briefing_requirements() is False
+
+
+def test_check_briefing_requirements_false_for_blank_token(monkeypatch):
+    """Whitespace-only token is treated as absent."""
+    plugin = _load_plugin_module()
+    monkeypatch.setenv("BRIEFING_RENDERER_SERVICE_TOKEN", "   ")
+    assert plugin.check_briefing_requirements() is False
+
+
+def test_check_briefing_requirements_does_not_make_http_request(monkeypatch):
+    """check_fn must not make a live HTTP call — renderer outages must not
+    remove tools from the schema."""
+    plugin = _load_plugin_module()
+    monkeypatch.setenv("BRIEFING_RENDERER_SERVICE_TOKEN", "some-token")
+
+    # Replace httpx.Client with a sentinel that raises if instantiated
+    class _ForbiddenClient:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("check_briefing_requirements must not make HTTP calls")
+
+    monkeypatch.setattr(plugin.httpx, "Client", _ForbiddenClient)
+    # Should return True without touching httpx
+    assert plugin.check_briefing_requirements() is True

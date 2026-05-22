@@ -12489,11 +12489,15 @@ class AIAgent:
                 # session-scoped state (e.g. warm a memory cache).
                 try:
                     from hermes_cli.plugins import invoke_hook as _invoke_hook
+                    _tool_names_snapshot = [t["function"]["name"] for t in (self.tools or [])]
                     _invoke_hook(
                         "on_session_start",
                         session_id=self.session_id,
                         model=self.model,
                         platform=getattr(self, "platform", None) or "",
+                        tool_names=_tool_names_snapshot,
+                        tool_definitions=list(self.tools or []),
+                        tool_count=len(self.tools or []),
                     )
                 except Exception as exc:
                     logger.warning("on_session_start hook failed: %s", exc)
@@ -12590,6 +12594,7 @@ class AIAgent:
         _plugin_user_context = ""
         try:
             from hermes_cli.plugins import invoke_hook as _invoke_hook
+            _tool_names_for_hook = [t["function"]["name"] for t in (self.tools or [])]
             _pre_results = _invoke_hook(
                 "pre_llm_call",
                 session_id=self.session_id,
@@ -12599,6 +12604,10 @@ class AIAgent:
                 model=self.model,
                 platform=getattr(self, "platform", None) or "",
                 sender_id=getattr(self, "_user_id", None) or "",
+                tool_names=_tool_names_for_hook,
+                tool_definitions=list(self.tools or []),
+                tool_count=len(self.tools or []),
+                system_prompt=active_system_prompt or "",
             )
             _ctx_parts: list[str] = []
             for r in _pre_results:
