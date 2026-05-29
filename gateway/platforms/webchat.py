@@ -164,12 +164,40 @@ def _format_webchat_attachment_note(raw_attachments: Any) -> str:
     return f"[Attachments: {', '.join(summarized)}]"
 
 
+def _is_tool_progress_message(raw_message: Dict[str, Any]) -> bool:
+    """True for cosmetic tool-activity breadcrumbs (displayType == "tool_progress").
+
+    The web UI stores a UI-only ``system`` message for every tool round (e.g.
+    ``🐍 execute_code: "import subprocess..."``). These are truncated previews of
+    the tool *input* — they carry no real conversational content and no structured
+    ``toolCalls``/results survive the round trip.
+    """
+    extra = raw_message.get("extra")
+    if isinstance(extra, dict) and str(extra.get("displayType") or "").strip() == "tool_progress":
+        return True
+    # Top-level displayType (older/export-normalized shape) is honored too.
+    return str(raw_message.get("displayType") or "").strip() == "tool_progress"
+
+
 def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw_message, dict):
         return None
 
     role = str(raw_message.get("role") or "").strip().lower()
     if role not in {"user", "assistant", "system"}:
+        return None
+
+    # Skip cosmetic tool-progress breadcrumbs. Replaying them as assistant turns
+    # is what breaks long webchat sessions: the web UI flattens every tool round
+    # into a ``system`` message, this builder mapped them to the ``assistant``
+    # role, and with no structured tool calls surviving the model ends up looking
+    # at a long assistant monologue where "using a tool" appears as plain prose.
+    # In-context imitation then biases it to narrate its next step instead of
+    # emitting a real tool call, so the agent loop ends the turn early and the
+    # task stalls. Excluding these breadcrumbs restores clean user/assistant
+    # structure without losing real content (the assistant's own replies already
+    # summarize tool outcomes).
+    if _is_tool_progress_message(raw_message):
         return None
 
     mapped_role = "assistant" if role == "system" else role

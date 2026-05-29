@@ -218,6 +218,64 @@ def test_build_webchat_context_transcript_uses_visible_branch_and_excludes_curre
     ]
 
 
+def test_build_webchat_context_transcript_excludes_tool_progress_breadcrumbs():
+    """Cosmetic tool_progress system messages must NOT be replayed to the model.
+
+    Replaying them (mapped to the assistant role) is what degrades long webchat
+    sessions: the model ends up looking at an assistant monologue where tool use
+    appears as prose, and stops emitting real tool calls. They should be dropped
+    while real user/assistant turns and genuine system status survive.
+    """
+    payload = {
+        "schemaVersion": 1,
+        "exportedAt": "2026-04-25T12:00:00.000Z",
+        "conversation": {"id": "conv-1", "currNode": "assistant-2", "lastModified": 7},
+        "visibleMessageIds": [
+            "user-1",
+            "tool-1",
+            "assistant-1",
+            "tool-2",
+            "assistant-2",
+            "status-1",
+        ],
+        "messages": [
+            {"id": "user-1", "role": "user", "content": "Build the system", "attachments": []},
+            {
+                "id": "tool-1",
+                "role": "system",
+                "content": '🐍 execute_code: "import subprocess..."',
+                "extra": {"displayType": "tool_progress"},
+                "attachments": [],
+            },
+            {"id": "assistant-1", "role": "assistant", "content": "Good, now let me install.", "attachments": []},
+            {
+                "id": "tool-2",
+                "role": "system",
+                "content": '💻 terminal: "cd /opt/hermes..."',
+                "extra": {"displayType": "tool_progress"},
+                "attachments": [],
+            },
+            {"id": "assistant-2", "role": "assistant", "content": "Done.", "attachments": []},
+            {"id": "status-1", "role": "system", "content": "Hermes worker appears stalled.", "attachments": []},
+        ],
+    }
+
+    transcript = build_webchat_context_transcript(payload)
+
+    assert transcript[0]["role"] == "session_meta"
+    # tool_progress breadcrumbs dropped; real turns + genuine status preserved.
+    assert [m["role"] for m in transcript[1:]] == ["user", "assistant", "assistant", "assistant"]
+    assert [m["content"] for m in transcript[1:]] == [
+        "Build the system",
+        "Good, now let me install.",
+        "Done.",
+        "[System status] Hermes worker appears stalled.",
+    ]
+    # No tool-input preview text leaks into the model-facing transcript.
+    assert not any("execute_code" in m["content"] for m in transcript[1:])
+    assert not any("terminal:" in m["content"] for m in transcript[1:])
+
+
 def test_fetch_conversation_context_resolves_relative_url():
     adapter = _build_adapter()
     adapter._client = Mock()
