@@ -7156,6 +7156,8 @@ class GatewayRunner:
             from gateway.platforms.webchat import (
                 build_webchat_context_marker,
                 build_webchat_context_transcript,
+                export_lacks_tool_round_trip,
+                transcript_has_tool_round_trip,
             )
 
             context_payload = await fetch_context(context_url)
@@ -7222,6 +7224,19 @@ class GatewayRunner:
                         expected_last_modified,
                     )
                     return history
+
+            if (
+                history
+                and transcript_has_tool_round_trip(history)
+                and export_lacks_tool_round_trip(context_payload or {})
+            ):
+                logger.info(
+                    "[gateway] Keeping webchat session transcript for chat=%s session=%s; "
+                    "page export has UI breadcrumbs only (no tool_calls/tool rows)",
+                    source.chat_id or "unknown",
+                    session_entry.session_id,
+                )
+                return history
 
             next_history = build_webchat_context_transcript(
                 context_payload or {},

@@ -11,6 +11,8 @@ from gateway.platforms.webchat import (
     WebChatAdapter,
     build_webchat_context_marker,
     build_webchat_context_transcript,
+    export_lacks_tool_round_trip,
+    transcript_has_tool_round_trip,
 )
 from gateway.run import GatewayRunner
 from gateway.session import SessionSource
@@ -263,17 +265,87 @@ def test_build_webchat_context_transcript_excludes_tool_progress_breadcrumbs():
     transcript = build_webchat_context_transcript(payload)
 
     assert transcript[0]["role"] == "session_meta"
-    # tool_progress breadcrumbs dropped; real turns + genuine status preserved.
-    assert [m["role"] for m in transcript[1:]] == ["user", "assistant", "assistant", "assistant"]
+    # tool_progress breadcrumbs and interim assistant narration before them are dropped.
+    assert [m["role"] for m in transcript[1:]] == ["user", "assistant", "assistant"]
     assert [m["content"] for m in transcript[1:]] == [
         "Build the system",
-        "Good, now let me install.",
         "Done.",
         "[System status] Hermes worker appears stalled.",
     ]
     # No tool-input preview text leaks into the model-facing transcript.
     assert not any("execute_code" in m["content"] for m in transcript[1:])
     assert not any("terminal:" in m["content"] for m in transcript[1:])
+
+
+def test_tool_round_trip_presence_helpers():
+    assert export_lacks_tool_round_trip({"messages": [{"role": "user", "content": "hi"}]})
+    assert not export_lacks_tool_round_trip(
+        {"messages": [{"role": "assistant", "toolCalls": [{"id": "call-1"}]}]}
+    )
+    assert transcript_has_tool_round_trip(
+        [{"role": "assistant", "tool_calls": [{"id": "call-1", "type": "function"}]}]
+    )
+    assert not transcript_has_tool_round_trip([{"role": "user", "content": "hi"}])
+
+
+def test_load_history_for_event_keeps_tool_structured_session_transcript():
+    stored_history = [
+        {"role": "session_meta", "webchat_context": {"conversationId": "conv-1"}},
+        {"role": "user", "content": "Earlier question"},
+        {
+            "role": "assistant",
+            "content": "navigating",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "browser_navigate", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "page html"},
+    ]
+    fetched_payload = {
+        "schemaVersion": 1,
+        "conversation": {"id": "conv-1", "currNode": "assistant-2", "lastModified": 99},
+        "visibleMessageIds": ["user-1", "assistant-1", "tool-1", "assistant-2"],
+        "messages": [
+            {"id": "user-1", "role": "user", "content": "Earlier question", "attachments": []},
+            {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": "Let me open the page.",
+                "attachments": [],
+            },
+            {
+                "id": "tool-1",
+                "role": "system",
+                "content": '🌐 browser_navigate: "https://example.com"',
+                "extra": {"displayType": "tool_progress"},
+                "attachments": [],
+            },
+            {"id": "assistant-2", "role": "assistant", "content": "Done.", "attachments": []},
+        ],
+    }
+    runner = _build_runner_with_history(stored_history, fetched_payload)
+    source = SessionSource(platform=Platform.WEBCHAT, chat_id="conv-1")
+    event = MessageEvent(
+        text="Follow-up",
+        message_type=MessageType.TEXT,
+        message_id="user-2",
+        source=source,
+        raw_message={
+            "conversationId": "conv-1",
+            "contextUrl": "http://webui:3000/api/internal/hermes/conversations/conv-1/context",
+            "contextVersion": {"currNode": "assistant-2", "lastModified": 99},
+        },
+    )
+    session_entry = SimpleNamespace(session_id="sess-1")
+
+    history = asyncio.run(runner._load_history_for_event(session_entry, event, source))
+
+    assert history == stored_history
+    runner.session_store.rewrite_transcript.assert_not_called()
 
 
 def test_fetch_conversation_context_resolves_relative_url():

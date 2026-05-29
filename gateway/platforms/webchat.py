@@ -164,6 +164,35 @@ def _format_webchat_attachment_note(raw_attachments: Any) -> str:
     return f"[Attachments: {', '.join(summarized)}]"
 
 
+def export_lacks_tool_round_trip(context_payload: Dict[str, Any]) -> bool:
+    """True when the WebUI export has no structured tool calls or tool results."""
+    raw_messages = context_payload.get("messages")
+    if not isinstance(raw_messages, list):
+        return True
+
+    for raw_message in raw_messages:
+        if not isinstance(raw_message, dict):
+            continue
+        if str(raw_message.get("role") or "").strip().lower() == "tool":
+            return False
+        tool_calls = raw_message.get("toolCalls")
+        if tool_calls:
+            return False
+    return True
+
+
+def transcript_has_tool_round_trip(messages: list) -> bool:
+    """True when a persisted gateway transcript still has OpenAI-style tool rows."""
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "tool":
+            return True
+        if message.get("tool_calls"):
+            return True
+    return False
+
+
 def _is_tool_progress_message(raw_message: Dict[str, Any]) -> bool:
     """True for cosmetic tool-activity breadcrumbs (displayType == "tool_progress").
 
@@ -177,6 +206,18 @@ def _is_tool_progress_message(raw_message: Dict[str, Any]) -> bool:
         return True
     # Top-level displayType (older/export-normalized shape) is honored too.
     return str(raw_message.get("displayType") or "").strip() == "tool_progress"
+
+
+def _is_interim_assistant_before_tool_progress(
+    raw_message: Optional[Dict[str, Any]],
+    next_raw_message: Optional[Dict[str, Any]],
+) -> bool:
+    """Assistant line that only announces the next tool_progress breadcrumb."""
+    if not isinstance(raw_message, dict):
+        return False
+    if str(raw_message.get("role") or "").strip().lower() != "assistant":
+        return False
+    return isinstance(next_raw_message, dict) and _is_tool_progress_message(next_raw_message)
 
 
 def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]:
@@ -302,10 +343,19 @@ def build_webchat_context_transcript(
     ]
 
     excluded_id = str(exclude_message_id or "").strip()
-    for message_id in marker["visibleMessageIds"]:
+    visible_ids = marker["visibleMessageIds"]
+    for index, message_id in enumerate(visible_ids):
         if excluded_id and message_id == excluded_id:
             continue
-        entry = _build_webchat_context_message(messages_by_id.get(message_id))
+        raw_message = messages_by_id.get(message_id)
+        next_raw_message = (
+            messages_by_id.get(visible_ids[index + 1])
+            if index + 1 < len(visible_ids)
+            else None
+        )
+        if _is_interim_assistant_before_tool_progress(raw_message, next_raw_message):
+            continue
+        entry = _build_webchat_context_message(raw_message)
         if entry:
             transcript.append(entry)
 

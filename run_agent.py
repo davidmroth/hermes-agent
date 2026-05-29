@@ -3924,7 +3924,6 @@ class AIAgent:
         )
         return (user_targets_workspace or assistant_targets_workspace) and assistant_mentions_action
 
-
     def _extract_reasoning(self, assistant_message) -> Optional[str]:
         """
         Extract reasoning/thinking content from an assistant message.
