@@ -15537,6 +15537,10 @@ class GatewayRunner:
 
             # Per-message state — callbacks and reasoning config change every
             # turn and must not be baked into the cached agent constructor.
+            agent.session_id = session_id
+            agent.platform = platform_key
+            if source.chat_id:
+                agent._chat_id = source.chat_id
             agent.tool_progress_callback = progress_callback if tool_progress_enabled else None
             agent.step_callback = _step_callback_sync if _hooks_ref.loaded_hooks else None
             agent.stream_delta_callback = _stream_delta_cb
