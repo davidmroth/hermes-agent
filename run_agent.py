@@ -1171,6 +1171,7 @@ class AIAgent:
         step_callback: callable = None,
         stream_delta_callback: callable = None,
         interim_assistant_callback: callable = None,
+        webchat_transcript_callback: callable = None,
         tool_gen_callback: callable = None,
         status_callback: callable = None,
         max_tokens: int = None,
@@ -1396,6 +1397,7 @@ class AIAgent:
         self.step_callback = step_callback
         self.stream_delta_callback = stream_delta_callback
         self.interim_assistant_callback = interim_assistant_callback
+        self.webchat_transcript_callback = webchat_transcript_callback
         self.status_callback = status_callback
         self.tool_gen_callback = tool_gen_callback
 
@@ -8094,6 +8096,21 @@ class AIAgent:
         except Exception:
             logger.debug("interim_assistant_callback error", exc_info=True)
 
+    def _notify_webchat_transcript_message(self, message: Dict[str, Any]) -> None:
+        """Persist structured assistant/tool rows to the WebUI during tool loops."""
+        cb = getattr(self, "webchat_transcript_callback", None)
+        if cb is None or not isinstance(message, dict):
+            return
+        role = message.get("role")
+        if role == "assistant" and not message.get("tool_calls"):
+            return
+        if role not in {"assistant", "tool"}:
+            return
+        try:
+            cb(message)
+        except Exception:
+            logger.debug("webchat_transcript_callback error", exc_info=True)
+
     def _fire_stream_delta(self, text: str) -> None:
         """Fire all registered stream delta callbacks (display + TTS)."""
         # If a tool iteration set the break flag, prepend a single paragraph
@@ -11556,6 +11573,7 @@ class AIAgent:
                 "tool_call_id": tc.id,
             }
             messages.append(tool_msg)
+            self._notify_webchat_transcript_message(tool_msg)
 
             # ── Per-tool /steer drain ───────────────────────────────────
             # Same as the sequential path: drain between each collected
@@ -11971,6 +11989,7 @@ class AIAgent:
                 "tool_call_id": tool_call.id
             }
             messages.append(tool_msg)
+            self._notify_webchat_transcript_message(tool_msg)
 
             # ── Per-tool /steer drain ───────────────────────────────────
             # Drain pending steer BETWEEN individual tool calls so the
@@ -15409,6 +15428,7 @@ class AIAgent:
 
                     messages.append(assistant_msg)
                     self._emit_interim_assistant_message(assistant_msg)
+                    self._notify_webchat_transcript_message(assistant_msg)
 
                     # Close any open streaming display (response box, reasoning
                     # box) before tool execution begins.  Intermediate turns may

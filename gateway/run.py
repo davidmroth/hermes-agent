@@ -15481,6 +15481,43 @@ class GatewayRunner:
                     log_message="interim_assistant_callback scheduling error",
                 )
 
+            _webchat_transcript_state: Dict[str, Optional[str]] = {"last_assistant_message_id": None}
+
+            async def _persist_webchat_transcript_message(msg: Dict[str, Any]) -> None:
+                if source.platform != Platform.WEBCHAT or not _status_adapter:
+                    return
+                from gateway.platforms.webchat import WebChatAdapter
+
+                if not isinstance(_status_adapter, WebChatAdapter):
+                    return
+
+                role = msg.get("role")
+                if role == "assistant" and msg.get("tool_calls"):
+                    result = await _status_adapter.persist_transcript_message(
+                        _status_chat_id,
+                        msg,
+                        user_message_id=event_message_id,
+                    )
+                    if result.success and result.message_id:
+                        _webchat_transcript_state["last_assistant_message_id"] = result.message_id
+                elif role == "tool":
+                    await _status_adapter.persist_transcript_message(
+                        _status_chat_id,
+                        msg,
+                        user_message_id=event_message_id,
+                        parent_message_id=_webchat_transcript_state.get("last_assistant_message_id"),
+                    )
+
+            def _webchat_transcript_cb(msg: Dict[str, Any]) -> None:
+                if not _run_still_current() or source.platform != Platform.WEBCHAT:
+                    return
+                safe_schedule_threadsafe(
+                    _persist_webchat_transcript_message(msg),
+                    _loop_for_step,
+                    logger=logger,
+                    log_message="webchat_transcript_callback scheduling error",
+                )
+
             turn_route = self._resolve_turn_agent_config(message, model, runtime_kwargs)
 
             # Check agent cache — reuse the AIAgent from the previous message
@@ -15560,6 +15597,9 @@ class GatewayRunner:
             agent.step_callback = _step_callback_sync if _hooks_ref.loaded_hooks else None
             agent.stream_delta_callback = _stream_delta_cb
             agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
+            agent.webchat_transcript_callback = (
+                _webchat_transcript_cb if source.platform == Platform.WEBCHAT else None
+            )
             agent.status_callback = _status_callback_sync
             agent.reasoning_config = reasoning_config
             agent.service_tier = self._service_tier

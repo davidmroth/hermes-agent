@@ -220,11 +220,72 @@ def _is_interim_assistant_before_tool_progress(
     return isinstance(next_raw_message, dict) and _is_tool_progress_message(next_raw_message)
 
 
+def _normalize_export_tool_calls(raw_tool_calls: Any) -> Optional[list[Dict[str, Any]]]:
+    if not isinstance(raw_tool_calls, list) or not raw_tool_calls:
+        return None
+
+    normalized: list[Dict[str, Any]] = []
+    for raw_call in raw_tool_calls:
+        if not isinstance(raw_call, dict):
+            continue
+        call_id = str(raw_call.get("id") or "").strip()
+        function = raw_call.get("function")
+        if isinstance(function, dict):
+            name = str(function.get("name") or "").strip()
+            arguments = function.get("arguments")
+        else:
+            name = str(raw_call.get("name") or "").strip()
+            arguments = raw_call.get("arguments")
+        if not call_id or not name:
+            continue
+        if arguments is None:
+            arguments = "{}"
+        elif not isinstance(arguments, str):
+            arguments = json.dumps(arguments, separators=(",", ":"), ensure_ascii=False)
+        normalized.append(
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": arguments},
+            }
+        )
+
+    return normalized or None
+
+
+def _tool_result_content(raw_content: Any) -> str:
+    if isinstance(raw_content, str):
+        return raw_content
+    if raw_content is None:
+        return ""
+    try:
+        return json.dumps(raw_content, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(raw_content)
+
+
 def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw_message, dict):
         return None
 
     role = str(raw_message.get("role") or "").strip().lower()
+    if role == "tool":
+        tool_call_id = str(
+            raw_message.get("toolCallId") or raw_message.get("tool_call_id") or ""
+        ).strip()
+        content = _tool_result_content(raw_message.get("content"))
+        if not tool_call_id or not content.strip():
+            return None
+        entry: Dict[str, Any] = {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": content,
+        }
+        timestamp = str(raw_message.get("createdAt") or "").strip()
+        if timestamp:
+            entry["timestamp"] = timestamp
+        return entry
+
     if role not in {"user", "assistant", "system"}:
         return None
 
@@ -257,7 +318,8 @@ def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]
         parts.append(attachment_note)
 
     final_content = "\n\n".join(part for part in parts if part).strip()
-    if not final_content:
+    tool_calls = _normalize_export_tool_calls(raw_message.get("toolCalls"))
+    if not final_content and not tool_calls:
         return None
 
     entry: Dict[str, Any] = {
@@ -272,6 +334,9 @@ def _build_webchat_context_message(raw_message: Any) -> Optional[Dict[str, Any]]
     reasoning = raw_message.get("reasoningContent")
     if mapped_role == "assistant" and isinstance(reasoning, str) and reasoning.strip():
         entry["reasoning"] = reasoning.strip()
+
+    if mapped_role == "assistant" and tool_calls:
+        entry["tool_calls"] = tool_calls
 
     return entry
 
@@ -934,16 +999,37 @@ class WebChatAdapter(BasePlatformAdapter):
             timings = metadata.get("timings")
             message_role = metadata.get("message_role")
             display_type = metadata.get("display_type")
+            tool_calls = metadata.get("tool_calls")
+            tool_call_id = metadata.get("tool_call_id")
+            parent_message_id = metadata.get("parent_message_id")
+            user_message_id = metadata.get("user_message_id")
             if timings:
                 payload["timings"] = timings
-            if message_role in {"assistant", "system"}:
+            if message_role in {"assistant", "system", "tool"}:
                 payload["role"] = message_role
             if display_type == "tool_progress":
                 payload["displayType"] = display_type
+            if tool_calls:
+                payload["toolCalls"] = tool_calls
+            if tool_call_id:
+                payload["toolCallId"] = tool_call_id
+            if parent_message_id:
+                payload["parentMessageId"] = parent_message_id
+            if user_message_id:
+                payload["userMessageId"] = user_message_id
             filtered_metadata = {
                 key: value
                 for key, value in metadata.items()
-                if key not in {"timings", "message_role", "display_type"}
+                if key
+                not in {
+                    "timings",
+                    "message_role",
+                    "display_type",
+                    "tool_calls",
+                    "tool_call_id",
+                    "parent_message_id",
+                    "user_message_id",
+                }
             }
             if filtered_metadata:
                 payload["metadata"] = filtered_metadata
@@ -963,6 +1049,93 @@ class WebChatAdapter(BasePlatformAdapter):
             success=True,
             message_id=str(data.get("messageId") or data.get("id") or ""),
             raw_response=data,
+        )
+
+    @staticmethod
+    def _serialize_tool_calls_for_webui(tool_calls: Any) -> Optional[list[Dict[str, Any]]]:
+        if not isinstance(tool_calls, list) or not tool_calls:
+            return None
+        serialized: list[Dict[str, Any]] = []
+        for raw_call in tool_calls:
+            if not isinstance(raw_call, dict):
+                continue
+            call_id = str(raw_call.get("id") or "").strip()
+            function = raw_call.get("function")
+            if isinstance(function, dict):
+                name = str(function.get("name") or "").strip()
+                arguments = function.get("arguments")
+            else:
+                name = str(raw_call.get("name") or "").strip()
+                arguments = raw_call.get("arguments")
+            if not call_id or not name:
+                continue
+            if arguments is None:
+                arguments = "{}"
+            elif not isinstance(arguments, str):
+                arguments = json.dumps(arguments, separators=(",", ":"), ensure_ascii=False)
+            serialized.append(
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": arguments},
+                }
+            )
+        return serialized or None
+
+    @staticmethod
+    def _serialize_tool_result_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return ""
+        if isinstance(content, list):
+            try:
+                return json.dumps(content, ensure_ascii=False)
+            except (TypeError, ValueError):
+                return str(content)
+        try:
+            return json.dumps(content, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(content)
+
+    async def persist_transcript_message(
+        self,
+        chat_id: str,
+        message: Dict[str, Any],
+        *,
+        user_message_id: Optional[str] = None,
+        parent_message_id: Optional[str] = None,
+    ) -> SendResult:
+        role = str(message.get("role") or "").strip().lower()
+        metadata: Dict[str, Any] = {"message_role": role}
+        if user_message_id:
+            metadata["user_message_id"] = user_message_id
+        if parent_message_id:
+            metadata["parent_message_id"] = parent_message_id
+
+        if role == "tool":
+            tool_call_id = str(message.get("tool_call_id") or "").strip()
+            if not tool_call_id:
+                return SendResult(success=False, error="tool message missing tool_call_id")
+            metadata["tool_call_id"] = tool_call_id
+            content = self._serialize_tool_result_content(message.get("content"))
+            return await self._post_assistant_message(
+                chat_id=chat_id,
+                content=content,
+                metadata=metadata,
+            )
+
+        if role != "assistant":
+            return SendResult(success=False, error=f"unsupported transcript role: {role}")
+
+        tool_calls = self._serialize_tool_calls_for_webui(message.get("tool_calls"))
+        if tool_calls:
+            metadata["tool_calls"] = tool_calls
+        content = str(message.get("content") or "")
+        return await self._post_assistant_message(
+            chat_id=chat_id,
+            content=content,
+            metadata=metadata,
         )
 
     @staticmethod

@@ -764,3 +764,119 @@ def test_process_message_background_propagates_event_timings_to_webchat_send():
     assert posted["json"]["content"] == "Final answer"
     assert posted["json"]["replyToMessageId"] == "msg-user"
     assert posted["json"]["timings"] == expected_timings
+
+
+def test_persist_transcript_message_posts_assistant_tool_calls():
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "assistant-tool-1"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = asyncio.run(
+        adapter.persist_transcript_message(
+            "conv-1",
+            {
+                "role": "assistant",
+                "content": "Let me inspect the repo.",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "search_files",
+                            "arguments": '{"target":"files"}',
+                        },
+                    }
+                ],
+            },
+            user_message_id="user-1",
+        )
+    )
+
+    assert result.success is True
+    assert result.message_id == "assistant-tool-1"
+    assert posted["json"]["role"] == "assistant"
+    assert posted["json"]["toolCalls"][0]["id"] == "call-1"
+    assert posted["json"]["userMessageId"] == "user-1"
+
+
+def test_persist_transcript_message_posts_tool_results():
+    adapter = _build_adapter()
+    posted = {}
+
+    async def _post(url, json, headers):
+        posted["json"] = json
+        return _Response(payload={"messageId": "tool-1"})
+
+    adapter._client = Mock()
+    adapter._client.post = AsyncMock(side_effect=_post)
+
+    result = asyncio.run(
+        adapter.persist_transcript_message(
+            "conv-1",
+            {
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "content": '{"success": true}',
+            },
+            parent_message_id="assistant-tool-1",
+        )
+    )
+
+    assert result.success is True
+    assert posted["json"]["role"] == "tool"
+    assert posted["json"]["toolCallId"] == "call-1"
+    assert posted["json"]["parentMessageId"] == "assistant-tool-1"
+
+
+def test_build_webchat_context_transcript_includes_structured_tool_round_trip():
+    payload = {
+        "schemaVersion": 1,
+        "exportedAt": "2026-04-25T12:00:00.000Z",
+        "conversation": {"id": "conv-1", "currNode": "assistant-2", "lastModified": 7},
+        "visibleMessageIds": [
+            "user-1",
+            "assistant-1",
+            "tool-1",
+            "assistant-2",
+        ],
+        "messages": [
+            {"id": "user-1", "role": "user", "content": "Build the system", "attachments": []},
+            {
+                "id": "assistant-1",
+                "role": "assistant",
+                "content": "Inspecting files.",
+                "toolCalls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "search_files",
+                            "arguments": '{"target":"files"}',
+                        },
+                    }
+                ],
+                "attachments": [],
+            },
+            {
+                "id": "tool-1",
+                "role": "tool",
+                "toolCallId": "call-1",
+                "content": '{"matches": []}',
+                "attachments": [],
+            },
+            {"id": "assistant-2", "role": "assistant", "content": "Done.", "attachments": []},
+        ],
+    }
+
+    transcript = build_webchat_context_transcript(payload)
+
+    assert [m["role"] for m in transcript[1:]] == ["user", "assistant", "tool", "assistant"]
+    assert transcript[2]["tool_calls"][0]["function"]["name"] == "search_files"
+    assert transcript[3]["tool_call_id"] == "call-1"
+    assert transcript[3]["content"] == '{"matches": []}'
