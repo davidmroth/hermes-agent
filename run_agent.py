@@ -16063,6 +16063,7 @@ class AIAgent:
                     conversation_history=list(messages),
                     model=self.model,
                     platform=getattr(self, "platform", None) or "",
+                    chat_id=self._chat_id or "",
                 )
             except Exception as exc:
                 logger.warning("post_llm_call hook failed: %s", exc)
@@ -16178,6 +16179,7 @@ class AIAgent:
                 interrupted=interrupted,
                 model=self.model,
                 platform=getattr(self, "platform", None) or "",
+                chat_id=self._chat_id or "",
             )
         except Exception as exc:
             logger.warning("on_session_end hook failed: %s", exc)
