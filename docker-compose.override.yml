@@ -129,6 +129,9 @@ services:
   # Uses the same LLM endpoint as Hermes (ai.local) for memory extraction.
   # Data persists in .data/hindsight (embedded PostgreSQL).
   #
+  # Setup:
+  #   dc run --rm gateway memory setup
+  #
   # Access the web UI: http://localhost:9999
   # ---------------------------------------------------------------------------
   hindsight:
