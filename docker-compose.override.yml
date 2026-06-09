@@ -10,6 +10,7 @@ services:
       - GATEWAY_ALLOW_ALL_USERS=true
       - CAMOFOX_URL=http://camofox:9377
       - AGENTLENS_SERVER_URL=http://agentlens:8500
+      - AGENTLENS_CAPTURE_RAW_API=1
       - PYTHONPATH=/opt/agentlens
       # Hindsight memory — local_external mode pointing at the hindsight service
       - HINDSIGHT_MODE=local_external
