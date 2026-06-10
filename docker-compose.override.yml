@@ -56,6 +56,8 @@ services:
         condition: service_healthy
       camofox:
         condition: service_healthy
+      cloakbrowser:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -74,6 +76,38 @@ services:
       options:
         max-file: "3"
         max-size: "10m"
+  # ---------------------------------------------------------------------------
+  # CloakBrowser — Stealth Chromium (C++ fingerprint patches)
+  # Provides browser automation with Chromium-based stealth.
+  # Hermes browser tools auto-route through CloakBrowser when
+  # BROWSER_BACKEND=cloakbrowser is set.
+  #
+  # First-time setup:
+  #   docker compose up -d cloakbrowser
+  #   docker compose exec cloakbrowser cloaktest   # quick smoke test
+  # ---------------------------------------------------------------------------
+  cloakbrowser:
+    image: cloakhq/cloakbrowser:latest
+    command: cloakserve
+    restart: unless-stopped
+    environment:
+      - CLOAKSERVE_IDLE_TIMEOUT=300
+    ports:
+      - "127.0.0.1:9222:9222"
+    volumes:
+      - .data/cloakbrowser:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "3"
+        max-size: "10m"
+
   # ---------------------------------------------------------------------------
   # Camofox — Local anti-detection browser (Firefox/Camoufox)
   # Provides browser automation with C++ fingerprint spoofing.

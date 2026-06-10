@@ -420,6 +420,17 @@ TOOL_CATEGORIES = {
                 "browser_provider": "camofox",
                 "post_setup": "camofox",
             },
+            {
+                "name": "CloakBrowser",
+                "badge": "free · local",
+                "tag": "Stealth Chromium (58 C++ fingerprint patches)",
+                "env_vars": [
+                    {"key": "BROWSER_BACKEND", "prompt": "Browser backend", "default": "cloakbrowser"},
+                    {"key": "CLOAKBROWSER_PROXY", "prompt": "CloakBrowser proxy URL (optional)"},
+                ],
+                "browser_provider": "cloakbrowser",
+                "post_setup": "cloakbrowser",
+            },
         ],
     },
     "homeassistant": {
@@ -837,6 +848,18 @@ def _run_post_setup(post_setup_key: str):
         elif not shutil.which("npm"):
             _print_warning("    Node.js not found. Install Camofox via Docker:")
             _print_info("      docker run -p 9377:9377 -e CAMOFOX_PORT=9377 jo-inc/camofox-browser")
+
+    elif post_setup_key == "cloakbrowser":
+        _print_info("    CloakBrowser uses Python's cloakbrowser package (Playwright-based).")
+        try:
+            import cloakbrowser
+            _print_success(f"    cloakbrowser is installed")
+            _print_info("    First use downloads Chromium automatically (~300MB)")
+            _print_info("    Configure with CLOAKBROWSER_PROXY, CLOAKBROWSER_HUMANIZE, etc.")
+        except ImportError:
+            _print_warning("    cloakbrowser package not found. Install:")
+            _print_info("      pip install cloakbrowser")
+            _print_info("    Or: pip install cloakbrowser[extra]")
 
     elif post_setup_key == "cua_driver":
         install_cua_driver(upgrade=False)

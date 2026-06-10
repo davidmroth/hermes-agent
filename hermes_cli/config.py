@@ -2198,6 +2198,24 @@ OPTIONAL_ENV_VARS = {
         "password": False,
         "category": "tool",
     },
+    "BROWSER_BACKEND": {
+        "description": "Browser backend to use: 'camofox', 'cloakbrowser', or 'agent-browser' (default). "
+                       "When set to 'cloakbrowser', uses CloakBrowser's Playwright-based stealth Chromium. "
+                       "When set to 'camofox', uses Camofox's REST API server.",
+        "prompt": "Browser backend",
+        "default": "agent-browser",
+        "tools": ["browser_navigate", "browser_click", "browser_snapshot"],
+        "password": False,
+        "category": "tool",
+    },
+    "CLOAKBROWSER_PROXY": {
+        "description": "CloakBrowser proxy URL for routing Chromium traffic through a proxy (e.g. http://proxy:port)",
+        "prompt": "CloakBrowser proxy URL (optional)",
+        "tools": ["browser_navigate", "browser_click"],
+        "password": False,
+        "category": "tool",
+        "advanced": True,
+    },
     "FAL_KEY": {
         "description": "FAL API key for image and video generation",
         "prompt": "FAL API key",

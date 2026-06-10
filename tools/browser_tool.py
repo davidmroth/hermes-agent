@@ -90,12 +90,20 @@ from tools.browser_providers.firecrawl import FirecrawlProvider
 from tools.tool_backend_helpers import normalize_browser_cloud_provider
 
 # Camofox local anti-detection browser backend (optional).
-# When CAMOFOX_URL is set, all browser operations route through the
-# camofox REST API instead of the agent-browser CLI.
+# When CAMOFOX_URL is set (and BROWSER_BACKEND not set to something else),
+# all browser operations route through the camofox REST API.
 try:
     from tools.browser_camofox import is_camofox_mode as _is_camofox_mode
 except ImportError:
     _is_camofox_mode = lambda: False  # noqa: E731
+
+# CloakBrowser stealth Chromium backend (optional).
+# When BROWSER_BACKEND=cloakbrowser, all browser operations route through
+# CloakBrowser's Playwright wrapper instead of agent-browser CLI or Camofox.
+try:
+    from tools.browser_cloakbrowser import is_cloakbrowser_mode as _is_cloakbrowser_mode
+except ImportError:
+    _is_cloakbrowser_mode = lambda: False  # noqa: E731
 
 logger = logging.getLogger(__name__)
 
@@ -508,12 +516,13 @@ def _is_local_backend() -> bool:
 
     SSRF protection is only meaningful for cloud backends (Browserbase,
     BrowserUse) where the agent could reach internal resources on a remote
-    machine.  For local backends — Camofox, or the built-in headless
-    Chromium without a cloud provider — the user already has full terminal
-    and network access on the same machine, so the check adds no security
-    value.
+    machine.  For local backends — Camofox, CloakBrowser, or the built-in
+    headless Chromium without a cloud provider — the user already has full
+    terminal and network access on the same machine, so the check adds no
+    security value.
     """
-    return _is_camofox_mode() or _get_cloud_provider() is None
+    return (_is_camofox_mode() or _is_cloakbrowser_mode()
+            or _get_cloud_provider() is None)
 
 
 _auto_local_for_private_urls_resolved = False
@@ -571,12 +580,12 @@ def _get_browser_engine() -> str:
 def _should_inject_engine(engine: str) -> bool:
     """Return True when the engine flag should be added to agent-browser commands.
 
-    Only inject ``--engine`` for non-cloud, non-camofox local sessions where
-    the engine is explicitly set (not ``auto``).
+    Only inject ``--engine`` for non-cloud, non-camofox, non-cloakbrowser local
+    sessions where the engine is explicitly set (not ``auto``).
     """
     if engine == "auto":
         return False
-    if _is_camofox_mode():
+    if _is_camofox_mode() or _is_cloakbrowser_mode():
         return False
     return _is_local_mode()
 
@@ -964,7 +973,7 @@ def _navigation_session_key(task_id: str, url: str) -> str:
         task_id = "default"
     if _get_cdp_override():
         return task_id
-    if _is_camofox_mode():
+    if _is_camofox_mode() or _is_cloakbrowser_mode():
         return task_id
     if _get_cloud_provider() is None:
         return task_id
@@ -1837,7 +1846,8 @@ def _run_browser_command(
     # hybrid private-URL routing can create a local sidecar while a cloud
     # provider remains configured for public URLs.
     engine = _engine_override or _get_browser_engine()
-    if engine != "auto" and not _is_camofox_mode() and not session_info.get("cdp_url"):
+    if (engine != "auto" and not _is_camofox_mode()
+            and not _is_cloakbrowser_mode() and not session_info.get("cdp_url")):
         backend_args += ["--engine", engine]
 
     # Keep concrete executable paths intact, even when they contain spaces.
@@ -2238,6 +2248,11 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         from tools.browser_camofox import camofox_navigate
         return camofox_navigate(url, task_id)
 
+    # CloakBrowser backend — delegate after safety checks pass
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_navigate
+        return cloakbrowser_navigate(url, task_id)
+
     if auto_local_this_nav:
         logger.info(
             "browser_navigate: auto-routing %s to local Chromium sidecar "
@@ -2384,6 +2399,10 @@ def browser_snapshot(
         from tools.browser_camofox import camofox_snapshot
         return camofox_snapshot(full, task_id, user_task)
 
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_snapshot
+        return cloakbrowser_snapshot(full, task_id, user_task)
+
     effective_task_id = _last_session_key(task_id or "default")
 
     # Build command args based on full flag
@@ -2448,6 +2467,10 @@ def browser_click(ref: str, task_id: Optional[str] = None) -> str:
         from tools.browser_camofox import camofox_click
         return camofox_click(ref, task_id)
 
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_click
+        return cloakbrowser_click(ref, task_id)
+
     effective_task_id = _last_session_key(task_id or "default")
 
     # Ensure ref starts with @
@@ -2485,6 +2508,10 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_type
         return camofox_type(ref, text, task_id)
+
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_type
+        return cloakbrowser_type(ref, text, task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
 
@@ -2542,6 +2569,10 @@ def browser_scroll(direction: str, task_id: Optional[str] = None) -> str:
             result = camofox_scroll(direction, task_id)
         return result
 
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_scroll
+        return cloakbrowser_scroll(direction, task_id)
+
     effective_task_id = _last_session_key(task_id or "default")
 
     result = _run_browser_command(effective_task_id, "scroll", [direction, str(_SCROLL_PIXELS)])
@@ -2572,6 +2603,10 @@ def browser_back(task_id: Optional[str] = None) -> str:
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_back
         return camofox_back(task_id)
+
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_back
+        return cloakbrowser_back(task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
     result = _run_browser_command(effective_task_id, "back", [])
@@ -2605,6 +2640,10 @@ def browser_press(key: str, task_id: Optional[str] = None) -> str:
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_press
         return camofox_press(key, task_id)
+
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_press
+        return cloakbrowser_press(key, task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
     result = _run_browser_command(effective_task_id, "press", [key])
@@ -2650,6 +2689,10 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
         from tools.browser_camofox import camofox_console
         return camofox_console(clear, task_id)
 
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_console
+        return cloakbrowser_console(clear, task_id)
+
     effective_task_id = _last_session_key(task_id or "default")
 
     console_args = ["--clear"] if clear else []
@@ -2692,6 +2735,10 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     """Evaluate a JavaScript expression in the page context and return the result."""
     if _is_camofox_mode():
         return _camofox_eval(expression, task_id)
+
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_eval
+        return cloakbrowser_eval(expression, task_id)
 
     effective_task_id = _last_session_key(task_id or "default")
 
@@ -2875,6 +2922,10 @@ def browser_get_images(task_id: Optional[str] = None) -> str:
         from tools.browser_camofox import camofox_get_images
         return camofox_get_images(task_id)
 
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_get_images
+        return cloakbrowser_get_images(task_id)
+
     effective_task_id = _last_session_key(task_id or "default")
 
     # Use eval to run JavaScript that extracts images
@@ -2945,6 +2996,10 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_vision
         return camofox_vision(question, annotate, task_id)
+
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import cloakbrowser_vision
+        return cloakbrowser_vision(question, annotate, task_id)
 
     import base64
     import uuid as uuid_mod
@@ -3270,6 +3325,15 @@ def _cleanup_single_browser_session(task_id: str) -> None:
         except Exception as e:
             logger.debug("Camofox cleanup for task %s: %s", task_id, e)
 
+    # Also clean up CloakBrowser session if running in CloakBrowser mode.
+    if _is_cloakbrowser_mode():
+        try:
+            from tools.browser_cloakbrowser import cloakbrowser_soft_cleanup, cloakbrowser_close
+            cloakbrowser_soft_cleanup(task_id)
+            cloakbrowser_close(task_id)
+        except Exception as e:
+            logger.debug("CloakBrowser cleanup for task %s: %s", task_id, e)
+
     logger.debug("cleanup_browser called for task_id: %s", task_id)
     logger.debug("Active sessions: %s", list(_active_sessions.keys()))
 
@@ -3489,6 +3553,11 @@ def check_browser_requirements() -> bool:
     # Camofox backend — only needs the server URL, no agent-browser CLI
     if _is_camofox_mode():
         return True
+
+    # CloakBrowser backend — only needs the cloakbrowser package installed
+    if _is_cloakbrowser_mode():
+        from tools.browser_cloakbrowser import check_cloakbrowser_available
+        return check_cloakbrowser_available()
 
     # CDP override mode can connect to an existing remote/local browser endpoint
     # without requiring the local agent-browser binary on PATH.
