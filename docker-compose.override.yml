@@ -294,7 +294,7 @@ services:
       dockerfile: .services/kokoro-tts/Dockerfile
       target: test
     environment:
-      - KOKORO_TEXT_NORMALIZATION_BACKEND=auto
+      - KOKORO_TEXT_NORMALIZATION_BACKEND=nemo
       - KOKORO_MODEL_DIR=/tmp/kokoro-test-models
       - KOKORO_PRONUNCIATIONS_PATH=/tmp/kokoro-test-pronunciations.json
 
