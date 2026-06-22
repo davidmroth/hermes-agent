@@ -11,6 +11,8 @@ services:
       - BROWSER_BACKEND=cloakbrowser
       - CLOAKBROWSER_CDP_URL=http://cloakbrowser:9222
       - WEBUI_PLUGIN_PATH=/opt/data/plugins/webchat-platform
+      # WebUI runs in a separate compose project; reach it via host-mapped port.
+      - WEBCHAT_URL=http://host.docker.internal:3001
       # Hindsight memory — local_external mode pointing at the hindsight service
       - HINDSIGHT_MODE=local_external
       - HINDSIGHT_API_URL=http://hindsight:8888
