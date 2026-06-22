@@ -68,3 +68,24 @@ def reset_plugin_discovery() -> None:
     import gateway.platforms.webchat as webchat_shim
 
     webchat_shim._ADAPTER_MODULE = None
+
+
+def import_plugin_module(module_name: str):
+    """Import a module file from the WebUI plugin directory."""
+    import importlib.util
+    import sys
+
+    src = resolve_webchat_plugin_src()
+    if src is None:
+        pytest.skip("WebUI plugin not found")
+    path = src / f"{module_name}.py"
+    if not path.is_file():
+        pytest.skip(f"WebUI plugin module missing: {path}")
+    qualname = f"webui_plugin_{module_name}"
+    spec = importlib.util.spec_from_file_location(qualname, path)
+    if spec is None or spec.loader is None:
+        pytest.skip(f"Cannot load WebUI plugin module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[qualname] = module
+    spec.loader.exec_module(module)
+    return module

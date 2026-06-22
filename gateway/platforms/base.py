@@ -3069,11 +3069,9 @@ class BasePlatformAdapter(ABC):
         
         def _build_delivery_metadata() -> Optional[dict]:
             metadata = {"thread_id": event.source.thread_id} if event.source.thread_id else None
-            if self.platform == Platform.WEBCHAT:
-                timings = getattr(event, "_hermes_timings", None)
-                if timings:
-                    metadata = dict(metadata or {})
-                    metadata["timings"] = timings
+            enrich = getattr(self, "enrich_delivery_metadata", None)
+            if callable(enrich):
+                metadata = enrich(metadata, event)
             return metadata
 
         # Start continuous typing indicator (refreshes every 2 seconds)

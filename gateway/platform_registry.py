@@ -158,6 +158,58 @@ class PlatformEntry:
     # targets when the gateway is not co-resident with the cron process.
     standalone_sender_fn: Optional[Callable[..., Awaitable[dict]]] = None
 
+    # ── Gateway runner integration (platform plugins) ──
+    # Optional hooks object implementing :class:`GatewayPlatformHooks`.
+    # Lets platform plugins own delivery/reconciliation behavior without
+    # hardcoded ``Platform.WEBCHAT`` branches in ``gateway/run.py``.
+    gateway_hooks: Optional[Any] = None
+
+
+@dataclass
+class GatewayPlatformHooks:
+    """Optional gateway-runner callbacks for a platform plugin."""
+
+    trusted_auth: bool = False
+
+    async def reconcile_session_history(
+        self,
+        *,
+        runner: Any,
+        session_entry: Any,
+        event: Any,
+        source: Any,
+        history: list,
+        adapter: Any,
+    ) -> list:
+        return history
+
+    def enrich_progress_metadata(self, metadata: Optional[dict]) -> Optional[dict]:
+        return metadata
+
+    def system_message_metadata(self, base_metadata: Optional[dict]) -> Optional[dict]:
+        return base_metadata
+
+    def should_buffer_lifecycle_status(self, message: str) -> bool:
+        return False
+
+    def create_transcript_callback(self, ctx: dict) -> Optional[Callable[..., Any]]:
+        return None
+
+    def merge_error_buffer(
+        self,
+        buffer: list[str],
+        text: str,
+        *,
+        failed: bool,
+    ) -> str:
+        return text
+
+    async def reconcile_preview_timings(self, ctx: dict) -> None:
+        return None
+
+    def enrich_busy_message_metadata(self, thread_meta: Optional[dict]) -> Optional[dict]:
+        return thread_meta
+
 
 class PlatformRegistry:
     """Central registry of platform adapters.

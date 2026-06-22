@@ -1,12 +1,19 @@
-"""Tests for tools/webchat_html_tool.py."""
+"""Tests for WebUI plugin send_html_to_webchat tool."""
 
 import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from gateway.config import Platform
-from tools.webchat_html_tool import send_html_to_webchat_tool
+from tests.gateway._webchat_plugin import import_plugin_module
+
+
+@pytest.fixture
+def webchat_tools():
+    return import_plugin_module("tools")
 
 
 def _run_async_immediately(coro):
@@ -16,25 +23,25 @@ def _run_async_immediately(coro):
 def _webchat_config(home_channel=None):
     webchat_cfg = SimpleNamespace(enabled=True, token="svc-token", extra={"url": "http://webui:3000"})
     return SimpleNamespace(
-        platforms={Platform.WEBCHAT: webchat_cfg},
+        platforms={Platform("webchat"): webchat_cfg},
         get_home_channel=lambda _platform: home_channel,
     ), webchat_cfg
 
 
 class TestSendHtmlToWebchatTool:
-    def test_uses_current_webchat_session_target(self, tmp_path):
+    def test_uses_current_webchat_session_target(self, tmp_path, webchat_tools):
         file_path = tmp_path / "artifact.html"
         file_path.write_text("<html><body>hello</body></html>", encoding="utf-8")
         config, webchat_cfg = _webchat_config()
 
         with patch("gateway.config.load_gateway_config", return_value=config), \
-             patch("tools.webchat_file_tool.get_session_env", side_effect=lambda name, default="": {
+             patch.object(webchat_tools, "get_session_env", side_effect=lambda name, default="": {
                  "HERMES_SESSION_PLATFORM": "webchat",
                  "HERMES_SESSION_CHAT_ID": "conv-1",
                  "HERMES_SESSION_THREAD_ID": "",
              }.get(name, default)), \
              patch("model_tools._run_async", side_effect=_run_async_immediately), \
-             patch("tools.webchat_html_tool._send_webchat", new=AsyncMock(return_value={
+             patch.object(webchat_tools, "_send_webchat", new=AsyncMock(return_value={
                  "success": True,
                  "platform": "webchat",
                  "chat_id": "conv-1",
@@ -43,7 +50,7 @@ class TestSendHtmlToWebchatTool:
                  "sender_target_url": "http://webui:3000/api/internal/hermes/conversations/conv-1/assistant",
              })) as send_mock:
             result = json.loads(
-                send_html_to_webchat_tool({
+                webchat_tools.send_html_to_webchat_tool({
                     "file_path": str(file_path),
                     "caption": "Attached HTML",
                 })
@@ -61,18 +68,18 @@ class TestSendHtmlToWebchatTool:
         assert result["debug"]["targetSource"] == "current-session"
         assert result["debug"]["senderTraceId"] == "trace-1"
 
-    def test_falls_back_to_recent_webchat_session(self, tmp_path):
+    def test_falls_back_to_recent_webchat_session(self, tmp_path, webchat_tools):
         file_path = tmp_path / "artifact.htm"
         file_path.write_text("<html><body>hello</body></html>", encoding="utf-8")
         config, webchat_cfg = _webchat_config()
 
         with patch("gateway.config.load_gateway_config", return_value=config), \
-             patch("tools.webchat_file_tool.get_session_env", return_value=""), \
-             patch("tools.webchat_file_tool._resolve_recent_session_target", return_value="conv-recent:thread-9"), \
+             patch.object(webchat_tools, "get_session_env", return_value=""), \
+             patch.object(webchat_tools, "_resolve_recent_session_target", return_value="conv-recent:thread-9"), \
              patch("model_tools._run_async", side_effect=_run_async_immediately), \
-             patch("tools.webchat_html_tool._send_webchat", new=AsyncMock(return_value={"success": True, "message_id": "msg-2"})) as send_mock:
+             patch.object(webchat_tools, "_send_webchat", new=AsyncMock(return_value={"success": True, "message_id": "msg-2"})) as send_mock:
             result = json.loads(
-                send_html_to_webchat_tool({
+                webchat_tools.send_html_to_webchat_tool({
                     "file_path": str(file_path),
                 })
             )
@@ -88,11 +95,11 @@ class TestSendHtmlToWebchatTool:
         assert result["success"] is True
         assert result["debug"]["targetSource"] == "recent-session"
 
-    def test_rejects_non_html_files(self, tmp_path):
+    def test_rejects_non_html_files(self, tmp_path, webchat_tools):
         file_path = tmp_path / "artifact.txt"
         file_path.write_text("hello", encoding="utf-8")
 
-        result = json.loads(send_html_to_webchat_tool({"file_path": str(file_path)}))
+        result = json.loads(webchat_tools.send_html_to_webchat_tool({"file_path": str(file_path)}))
 
         assert result["error"] == "file_path must point to an HTML file (.html or .htm)."
         assert result["debug"]["fileExists"] is True

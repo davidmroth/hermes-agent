@@ -22,29 +22,22 @@ This branch **restores Camofox** for upstream parity. Docker dev uses **CloakBro
 
 ## WebChat as a platform plugin (WebUI repo)
 
-WebChat adapter code lives in the **WebUI repo**, not hermes-agent:
+All WebUI integration ships from **`webui/plugin/`** and mounts into Hermes:
 
 ```
 webui/plugin/
+├── adapter.py         # reverse-polling gateway adapter
+├── gateway_hooks.py   # reconciliation, status buffer, transcript, preview timings
+├── tools.py           # send_file_to_webchat, send_html_to_webchat
 ├── plugin.yaml
-├── adapter.py    # reverse-polling gateway adapter
-└── __init__.py
+└── README.md
 ```
 
-Docker mounts it into the gateway profile (same pattern as briefing):
+Hermes core adds only **generic** `GatewayPlatformHooks` (`gateway/platform_registry.py` + `gateway/platform_hook_dispatch.py`). `gateway/run.py` dispatches to hooks — no WebUI-specific logic left in core.
 
-```yaml
-# hermes-agent/docker-compose.override.yml
-- ../webui/plugin:/opt/data/plugins/webchat-platform:ro
-```
+`gateway/platforms/webchat.py` is a thin re-export shim for tests/legacy imports.
 
-Enable once: `hermes plugins enable webchat-platform`
-
-`gateway/platforms/webchat.py` is a thin re-export shim for legacy imports in `gateway/run.py` and tests. It resolves the adapter from, in order:
-
-1. `WEBUI_PLUGIN_PATH` env
-2. Sibling checkout `../webui/plugin` (local dev)
-3. `~/.hermes/plugins/webchat-platform/` (mounted plugin)
+**Hindsight** stays in `docker-compose.override.yml` as-is (required sidecar).
 
 ### Still in core (next migration)
 
