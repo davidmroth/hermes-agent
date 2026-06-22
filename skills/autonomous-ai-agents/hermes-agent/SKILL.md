@@ -403,7 +403,7 @@ Enable/disable via `hermes tools` (interactive) or `hermes tools enable/disable 
 |---------|-----------------|
 | `web` | Web search and content extraction |
 | `search` | Web search only (subset of `web`) |
-| `browser` | Browser automation (Browserbase, Camofox, or local Chromium) |
+| `browser` | Browser automation (Browserbase, CloakBrowser, or local Chromium) |
 | `terminal` | Shell commands and process management |
 | `file` | File read/write/search/patch |
 | `code_execution` | Sandboxed Python execution |

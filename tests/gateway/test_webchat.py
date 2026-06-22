@@ -16,6 +16,17 @@ from gateway.platforms.webchat import (
 )
 from gateway.run import GatewayRunner
 from gateway.session import SessionSource
+from tests.gateway._webchat_plugin import install_webchat_plugin, reset_plugin_discovery
+
+
+@pytest.fixture(autouse=True)
+def _webchat_plugin_installed(_isolate_hermes_home):
+    """Install + enable the WebUI plugin so platform registry tests see webchat."""
+    from hermes_constants import get_hermes_home
+
+    install_webchat_plugin(get_hermes_home())
+    reset_plugin_discovery()
+    yield
 
 
 class _Response:
@@ -148,7 +159,8 @@ def test_runner_creates_webchat_adapter():
         PlatformConfig(enabled=True, token="svc-token", extra={"url": "http://webui:3000"}),
     )
 
-    assert isinstance(adapter, WebChatAdapter)
+    assert adapter is not None
+    assert type(adapter).__name__ == "WebChatAdapter"
 
 
 def test_runner_authorizes_webchat_events_via_service_token_boundary():

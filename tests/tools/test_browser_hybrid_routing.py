@@ -28,9 +28,12 @@ def _reset_routing_state(monkeypatch):
     monkeypatch.setattr(browser_tool, "_cached_auto_local_for_private_urls", True)
     monkeypatch.setattr(browser_tool, "_start_browser_cleanup_thread", lambda: None)
     monkeypatch.setattr(browser_tool, "_update_session_activity", lambda t: None)
-    # Default: no CDP override, no Camofox
+    # Default: no CDP override, no Camofox, no CloakBrowser
+    monkeypatch.delenv("BROWSER_BACKEND", raising=False)
+    monkeypatch.delenv("CLOAKBROWSER_CDP_URL", raising=False)
     monkeypatch.setattr(browser_tool, "_get_cdp_override", lambda: None)
     monkeypatch.setattr(browser_tool, "_is_camofox_mode", lambda: False)
+    monkeypatch.setattr(browser_tool, "_is_cloakbrowser_mode", lambda: False)
 
 
 class TestNavigationSessionKey:

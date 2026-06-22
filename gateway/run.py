@@ -5437,13 +5437,6 @@ class GatewayRunner:
                 return None
             return APIServerAdapter(config)
 
-        elif platform == Platform.WEBCHAT:
-            from gateway.platforms.webchat import WebChatAdapter, check_webchat_requirements
-            if not check_webchat_requirements():
-                logger.warning("Webchat: httpx not installed")
-                return None
-            return WebChatAdapter(config)
-
         elif platform == Platform.WEBHOOK:
             from gateway.platforms.webhook import WebhookAdapter, check_webhook_requirements
             if not check_webhook_requirements():

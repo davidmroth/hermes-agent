@@ -2,6 +2,8 @@
 
 This file records the custom integration work that has landed in this branch, plus the pieces that were explored but intentionally not shipped. Keep it updated whenever private diff slices are merged so the next integration task starts from facts instead of archaeology.
 
+**Upgrade strategy:** see [`docs/upgrade_playbook.md`](upgrade_playbook.md) for the drop-in plugin layout, Camofox vs CloakBrowser split, and upstream merge workflow.
+
 ## Recently Completed Follow-Up Slices
 
 The selected follow-up set from `v2026.4.23.diff` is now landed in this branch:
@@ -57,7 +59,7 @@ The landed WebChat slice added:
   - Added connection gating so WebChat only counts as connected when both the service token and base URL exist
 
 - `gateway/platforms/webchat.py`
-  - New adapter implementation
+  - Thin re-export shim; implementation is in the WebUI repo at `webui/plugin/adapter.py`
   - Performs health check against the WebUI
   - Polls the WebUI inbox for queued user messages
   - Downloads inbound attachments to the Hermes cache

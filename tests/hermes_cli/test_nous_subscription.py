@@ -99,8 +99,8 @@ def test_get_nous_subscription_features_uses_direct_browserbase_when_no_managed_
     assert features.browser.current_provider == "Browserbase"
 
 
-def test_get_nous_subscription_features_prefers_camofox_over_managed_browser_use(monkeypatch):
-    env = {"CAMOFOX_URL": "http://localhost:9377"}
+def test_get_nous_subscription_features_prefers_cloakbrowser_over_managed_browser_use(monkeypatch):
+    env = {"BROWSER_BACKEND": "cloakbrowser"}
 
     monkeypatch.setattr(ns, "get_env_value", lambda name: env.get(name, ""))
     monkeypatch.setattr(ns, "get_nous_auth_status", lambda: {"logged_in": True})
@@ -123,7 +123,7 @@ def test_get_nous_subscription_features_prefers_camofox_over_managed_browser_use
     assert features.browser.active is True
     assert features.browser.managed_by_nous is False
     assert features.browser.direct_override is True
-    assert features.browser.current_provider == "Camofox"
+    assert features.browser.current_provider == "CloakBrowser"
 
 
 def test_get_nous_subscription_features_requires_agent_browser_for_browserbase(monkeypatch):

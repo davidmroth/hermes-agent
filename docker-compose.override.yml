@@ -8,7 +8,9 @@ services:
   gateway:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
-      - CAMOFOX_URL=http://camofox:9377
+      - BROWSER_BACKEND=cloakbrowser
+      - CLOAKBROWSER_CDP_URL=http://cloakbrowser:9222
+      - WEBUI_PLUGIN_PATH=/opt/data/plugins/webchat-platform
       # Hindsight memory — local_external mode pointing at the hindsight service
       - HINDSIGHT_MODE=local_external
       - HINDSIGHT_API_URL=http://hindsight:8888
@@ -20,6 +22,7 @@ services:
       - .data/hermes/.venv:/opt/hermes/.venv
       # Custom integrations and plugins — mount these read-only from the host for hot-reload during development.
       - ./.services/briefing-service/plugin:/opt/data/plugins/briefing:ro
+      - ../webui/plugin:/opt/data/plugins/webchat-platform:ro
       # Mouting doesn't work for the for the follow, so I manually copy them into the container and restart it when I make changes. TODO: figure out why.
       #- ./.misc/hermes-themes/dashboard-theme/theme/task-management.yaml:/opt/data/dashboard-themes/task-management.yaml:ro
       - ./.misc/hermes-themes/dashboard-theme/dashboard:/opt/data/plugins/task-management-dashboard:ro
@@ -38,6 +41,8 @@ services:
       - ./tools:/opt/hermes/tools
       - ./hermes_cli:/opt/hermes/hermes_cli
       - ./gateway:/opt/hermes/gateway
+      - ./plugins:/opt/hermes/plugins
+      - ./tests:/opt/hermes/tests
       - ./cron:/opt/hermes/cron
       - ./skills:/opt/hermes/skills
       - ./optional-skills:/opt/hermes/optional-skills
@@ -47,8 +52,6 @@ services:
       - "ai.local:192.168.87.153"
     network_mode: !bridge
     depends_on:
-      camofox:
-        condition: service_healthy
       cloakbrowser:
         condition: service_healthy
     logging:
@@ -91,56 +94,6 @@ services:
       - .data/cloakbrowser:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "3"
-        max-size: "10m"
-
-  # ---------------------------------------------------------------------------
-  # Camofox — Local anti-detection browser (Firefox/Camoufox)
-  # Provides browser automation with C++ fingerprint spoofing.
-  # Hermes browser tools auto-route through Camofox when CAMOFOX_URL is set.
-  #
-  # First-time setup:
-  #   git clone https://github.com/jo-inc/camofox-browser .data/camofox-browser
-  #   cd .data/camofox-browser && make fetch
-  #   cd ../.. && docker compose build camofox
-  # ---------------------------------------------------------------------------
-  camofox:
-    build:
-      context: .services/camofox-browser
-      dockerfile: Dockerfile
-      args:
-        ARCH: x86_64
-        CAMOUFOX_VERSION: "135.0.1"
-        CAMOUFOX_RELEASE: "beta.24"
-    restart: unless-stopped
-    environment:
-      - CAMOFOX_PORT=9377
-      # Persistent browser profiles — Camofox maps userId → profile dir.
-      # Enable managed_persistence in config.yaml for Hermes to send stable IDs.
-      - CAMOFOX_PROFILE_DIR=/data/profiles
-      # Tune for single-agent use (lower resource footprint)
-      - MAX_SESSIONS=10
-      - MAX_TABS_PER_SESSION=5
-      - SESSION_TIMEOUT_MS=1800000
-      - BROWSER_IDLE_TIMEOUT_MS=300000
-      - NODE_OPTIONS=--max-old-space-size=4096
-    volumes:
-      - .data/camofox:/data
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://localhost:9377/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))",
-        ]
       interval: 10s
       timeout: 5s
       retries: 12

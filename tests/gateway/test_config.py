@@ -151,14 +151,20 @@ class TestGetConnectedPlatforms:
 
 
 class TestWebchatEnvOverrides:
-    def test_webchat_env_overrides(self, monkeypatch):
+    def test_webchat_env_overrides(self, monkeypatch, _isolate_hermes_home):
+        from hermes_constants import get_hermes_home
+        from gateway.config import load_gateway_config
+        from tests.gateway._webchat_plugin import install_webchat_plugin, reset_plugin_discovery
+
+        install_webchat_plugin(get_hermes_home())
+        reset_plugin_discovery()
+
         monkeypatch.setenv("WEBCHAT_ENABLED", "true")
         monkeypatch.setenv("WEBCHAT_URL", "http://webui:3000")
         monkeypatch.setenv("WEBCHAT_SERVICE_TOKEN", "svc-token")
         monkeypatch.setenv("WEBCHAT_POLL_INTERVAL", "2.5")
 
-        config = GatewayConfig()
-        _apply_env_overrides(config)
+        config = load_gateway_config()
 
         assert Platform.WEBCHAT in config.platforms
         assert config.platforms[Platform.WEBCHAT].enabled is True

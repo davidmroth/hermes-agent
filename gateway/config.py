@@ -417,7 +417,6 @@ _PLATFORM_CONNECTED_CHECKERS: dict[Platform, Callable[[PlatformConfig], bool]] =
     Platform.EMAIL: lambda cfg: bool(cfg.extra.get("address")),
     Platform.SMS: lambda cfg: bool(os.getenv("TWILIO_ACCOUNT_SID")),
     Platform.API_SERVER: lambda cfg: True,
-    Platform.WEBCHAT: lambda cfg: bool(cfg.token and cfg.extra.get("url")),
     Platform.WEBHOOK: lambda cfg: True,
     Platform.MSGRAPH_WEBHOOK: lambda cfg: True,
     Platform.FEISHU: lambda cfg: bool(cfg.extra.get("app_id")),
@@ -1373,34 +1372,7 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         )
 
     # Webchat
-    webchat_enabled = os.getenv("WEBCHAT_ENABLED", "").lower() in ("true", "1", "yes")
-    webchat_url = os.getenv("WEBCHAT_URL", "")
-    webchat_token = os.getenv("WEBCHAT_SERVICE_TOKEN", "")
-    webchat_poll_interval = os.getenv("WEBCHAT_POLL_INTERVAL")
-    webchat_public_base_url = os.getenv("WEBCHAT_PUBLIC_BASE_URL", "")
-    if webchat_enabled or webchat_url or webchat_token:
-        if Platform.WEBCHAT not in config.platforms:
-            config.platforms[Platform.WEBCHAT] = PlatformConfig()
-        config.platforms[Platform.WEBCHAT].enabled = True
-        if webchat_token:
-            config.platforms[Platform.WEBCHAT].token = webchat_token
-        if webchat_url:
-            config.platforms[Platform.WEBCHAT].extra["url"] = webchat_url
-        if webchat_public_base_url:
-            config.platforms[Platform.WEBCHAT].extra["public_base_url"] = webchat_public_base_url
-        if webchat_poll_interval:
-            try:
-                config.platforms[Platform.WEBCHAT].extra["poll_interval"] = float(webchat_poll_interval)
-            except ValueError:
-                pass
-
-    webchat_home = os.getenv("WEBCHAT_HOME_CHANNEL")
-    if webchat_home and Platform.WEBCHAT in config.platforms:
-        config.platforms[Platform.WEBCHAT].home_channel = HomeChannel(
-            platform=Platform.WEBCHAT,
-            chat_id=webchat_home,
-            name=os.getenv("WEBCHAT_HOME_CHANNEL_NAME", "Home"),
-        )
+    # WebChat env wiring is owned by plugins/platforms/webchat (env_enablement_fn).
 
     # Mattermost
     mattermost_token = os.getenv("MATTERMOST_TOKEN")
@@ -1893,6 +1865,9 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
                     # up as a proper HomeChannel dataclass.  Everything else is
                     # merged into ``extra``.
                     home = seed.pop("home_channel", None)
+                    service_token = seed.pop("service_token", None)
+                    if service_token:
+                        config.platforms[platform].token = str(service_token)
                     config.platforms[platform].extra.update(seed)
                     if isinstance(home, dict) and home.get("chat_id"):
                         config.platforms[platform].home_channel = HomeChannel(
