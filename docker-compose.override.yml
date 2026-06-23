@@ -23,6 +23,7 @@ services:
       # Custom integrations and plugins — mount these read-only from the host for hot-reload during development.
       - ./.services/briefing-service/plugin:/opt/data/plugins/briefing:ro
       - ../webui/plugin:/opt/data/plugins/webchat-platform:ro
+      - ../model-runner-v3/services/hermes-inference-bridge/plugin:/opt/data/plugins/model-providers/inference-bridge:ro
       # Mouting doesn't work for the for the follow, so I manually copy them into the container and restart it when I make changes. TODO: figure out why.
       #- ./.misc/hermes-themes/dashboard-theme/theme/task-management.yaml:/opt/data/dashboard-themes/task-management.yaml:ro
       - ./.misc/hermes-themes/dashboard-theme/dashboard:/opt/data/plugins/task-management-dashboard:ro
