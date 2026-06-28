@@ -1,0 +1,29 @@
+name: cloakbrowser
+version: 1.0.0
+description: >
+  Thread-safe CloakBrowser backend for Hermes browser tools. Connects to a
+  cloakserve CDP endpoint and overrides browser_* tools with Playwright on a
+  dedicated worker thread (auto-snapshot on navigate, robust ref resolution,
+  console capture). Install under ~/.hermes/plugins/cloakbrowser to survive
+  Hermes upgrades without fork-specific browser_tool routing.
+author: Hermes Agent
+hooks:
+  - on_session_end
+requires_env:
+  - name: CLOAKBROWSER_CDP_URL
+    description: CloakBrowser CDP base URL (e.g. http://cloakbrowser:9222)
+    prompt: CloakBrowser CDP URL
+    password: false
+optional_env:
+  - name: CLOAKBROWSER_PLUGIN_ENABLED
+    description: Set to 0/false to disable overrides while keeping the plugin installed
+    prompt: Enable CloakBrowser plugin?
+    password: false
+  - name: CLOAKBROWSER_NAVIGATE_SNAPSHOT
+    description: Include accessibility snapshot in browser_navigate responses (default on)
+    prompt: Auto-snapshot on navigate?
+    password: false
+  - name: CLOAKBROWSER_CONSOLE_CAPTURE
+    description: Capture console/JS errors on each page (default on)
+    prompt: Capture browser console?
+    password: false

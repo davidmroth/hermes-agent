@@ -8,7 +8,7 @@ services:
   gateway:
     environment:
       - GATEWAY_ALLOW_ALL_USERS=true
-      - BROWSER_BACKEND=cloakbrowser
+      # CloakBrowser browser_* overrides come from plugins/cloakbrowser (override=True).
       - CLOAKBROWSER_CDP_URL=http://cloakbrowser:9222
       - WEBUI_PLUGIN_PATH=/opt/data/plugins/webchat-platform
       # Hindsight memory — local_external mode pointing at the hindsight service
@@ -76,8 +76,8 @@ services:
   # ---------------------------------------------------------------------------
   # CloakBrowser — Stealth Chromium (C++ fingerprint patches)
   # Provides browser automation with Chromium-based stealth.
-  # Hermes browser tools auto-route through CloakBrowser when
-  # BROWSER_BACKEND=cloakbrowser is set.
+  # Hermes browser tools route through plugins/cloakbrowser when
+  # CLOAKBROWSER_CDP_URL is set (no fork-specific BROWSER_BACKEND routing needed).
   #
   # First-time setup:
   #   docker compose up -d cloakbrowser
