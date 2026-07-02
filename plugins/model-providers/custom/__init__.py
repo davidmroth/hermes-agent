@@ -30,25 +30,12 @@ class CustomProfile(ProviderProfile):
             options["num_ctx"] = ollama_num_ctx
             extra_body["options"] = options
 
-        # Qwen3 / Lucebox / llama.cpp: disable thinking unless explicitly enabled.
-        # v3 BeeLlama used enable_thinking=false for reliable tool calling (Qwen docs).
-        _thinking_on = False
+        # Disable thinking when reasoning is turned off
         if reasoning_config and isinstance(reasoning_config, dict):
             _effort = (reasoning_config.get("effort") or "").strip().lower()
             _enabled = reasoning_config.get("enabled", True)
             if _effort == "none" or _enabled is False:
-                _thinking_on = False
-            elif _enabled is True and _effort not in ("", "none"):
-                _thinking_on = True
-
-        if not _thinking_on:
-            extra_body["think"] = False
-            ctk = extra_body.get("chat_template_kwargs")
-            if not isinstance(ctk, dict):
-                ctk = {}
-            ctk.setdefault("enable_thinking", False)
-            ctk.setdefault("preserve_thinking", True)
-            extra_body["chat_template_kwargs"] = ctk
+                extra_body["think"] = False
 
         return extra_body, {}
 
