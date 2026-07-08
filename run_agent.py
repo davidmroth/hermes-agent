@@ -636,8 +636,15 @@ def _sanitize_surrogates(text: str) -> str:
     """Replace lone surrogate code points with U+FFFD (replacement character).
 
     Surrogates are invalid in UTF-8 and will crash ``json.dumps()`` inside the
-    OpenAI SDK.  This is a fast no-op when the text contains no surrogates.
+    OpenAI SDK.  Valid UTF-16 surrogate *pairs* are decoded to their code point
+    first so emoji from some tokenizers survive intact.
     """
+    if not _SURROGATE_RE.search(text):
+        return text
+    try:
+        text = text.encode('utf-16', 'surrogatepass').decode('utf-16')
+    except UnicodeDecodeError:
+        pass
     if _SURROGATE_RE.search(text):
         return _SURROGATE_RE.sub('\ufffd', text)
     return text

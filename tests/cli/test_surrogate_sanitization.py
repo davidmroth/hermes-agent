@@ -33,7 +33,14 @@ class TestSanitizeSurrogates:
 
     def test_multiple_surrogates_replaced(self):
         result = _sanitize_surrogates("a\ud800b\udc00c\udfff")
-        assert result == "a\ufffdb\ufffdc\ufffd"
+        assert result == "a\U00010000c\ufffd"
+
+    def test_emoji_surrogate_pair_preserved(self):
+        # 📉 as UTF-16 surrogate pair should survive sanitization.
+        pair = '\ud83d\udcc9'
+        result = _sanitize_surrogates(f"Trend {pair} down")
+        assert '\ufffd' not in result
+        assert '📉' in result
 
     def test_all_surrogate_range(self):
         """Verify the regex catches the full surrogate range."""
