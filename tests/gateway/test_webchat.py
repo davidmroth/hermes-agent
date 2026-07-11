@@ -892,3 +892,76 @@ def test_build_webchat_context_transcript_includes_structured_tool_round_trip():
     assert transcript[2]["tool_calls"][0]["function"]["name"] == "search_files"
     assert transcript[3]["tool_call_id"] == "call-1"
     assert transcript[3]["content"] == '{"matches": []}'
+
+
+def test_fetch_event_cancelled_reads_webui_event_status():
+    adapter = _build_adapter()
+    adapter._client = Mock()
+    adapter._client.get = AsyncMock(
+        return_value=_Response(payload={"status": "cancelled", "cancelled": True})
+    )
+
+    assert asyncio.run(adapter._fetch_event_cancelled("evt-123")) is True
+    adapter._client.get.assert_awaited_once_with(
+        "http://webui:3000/api/internal/hermes/events/evt-123",
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Bearer svc-token",
+        },
+    )
+
+
+def test_user_cancel_watcher_interrupts_active_session():
+    adapter = _build_adapter()
+    adapter._fetch_event_cancelled = AsyncMock(side_effect=[False, True])
+    adapter.interrupt_session_activity = AsyncMock()
+    adapter._poll_interval = 0.01
+
+    source = adapter.build_source(chat_id="conv-1", user_id="user-1")
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=source,
+        raw_message={"eventId": "evt-123"},
+        message_id="msg-user",
+    )
+
+    watcher = adapter._start_user_cancel_watcher(event, "agent:main:webchat:dm:conv-1")
+    assert watcher is not None
+    asyncio.run(asyncio.wait_for(watcher, timeout=1.0))
+
+    adapter.interrupt_session_activity.assert_awaited_once_with(
+        "agent:main:webchat:dm:conv-1",
+        "conv-1",
+    )
+
+
+def test_on_processing_complete_acks_user_cancelled_event():
+    adapter = _build_adapter()
+    adapter._fetch_event_cancelled = AsyncMock(return_value=True)
+    adapter._ack_event = AsyncMock()
+
+    source = adapter.build_source(chat_id="conv-1", user_id="user-1")
+    event = MessageEvent(
+        text="hello",
+        message_type=MessageType.TEXT,
+        source=source,
+        raw_message={"eventId": "evt-123"},
+        message_id="msg-user",
+    )
+
+    asyncio.run(adapter.on_processing_complete(event, ProcessingOutcome.CANCELLED))
+
+    adapter._ack_event.assert_awaited_once_with("evt-123")
+
+
+def test_resolve_attachment_content_type_uses_file_name_for_octet_stream_images():
+    adapter = _build_adapter()
+
+    assert (
+        adapter._resolve_attachment_content_type(
+            "salvantfamily.com_wp-admin_themes.php_page=theme-git-updater.png",
+            "application/octet-stream",
+        )
+        == "image/png"
+    )
