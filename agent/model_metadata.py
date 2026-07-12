@@ -308,11 +308,14 @@ _MAX_COMPLETION_KEYS = (
 
 # Local server hostnames / address patterns
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
-# Docker / Podman / Lima DNS names that resolve to the host machine
+# Docker / Podman / Lima DNS names that resolve to the host machine,
+# plus mDNS .local hostnames (e.g. ai.local, raspberrypi.local) which
+# are always LAN-local and need the same stale-timeout auto-disable.
 _CONTAINER_LOCAL_SUFFIXES = (
     ".docker.internal",
     ".containers.internal",
     ".lima.internal",
+    ".local",
 )
 
 
