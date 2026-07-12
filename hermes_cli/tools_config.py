@@ -423,9 +423,14 @@ TOOL_CATEGORIES = {
             {
                 "name": "CloakBrowser",
                 "badge": "free · local",
-                "tag": "Stealth Chromium (58 C++ fingerprint patches)",
+                "tag": "Stealth Chromium via plugins/cloakbrowser (thread-safe CDP)",
                 "env_vars": [
-                    {"key": "BROWSER_BACKEND", "prompt": "Browser backend", "default": "cloakbrowser"},
+                    {
+                        "key": "CLOAKBROWSER_CDP_URL",
+                        "prompt": "CloakBrowser CDP URL",
+                        "default": "http://cloakbrowser:9222",
+                        "url": "https://github.com/CloakHQ/CloakBrowser",
+                    },
                     {"key": "CLOAKBROWSER_PROXY", "prompt": "CloakBrowser proxy URL (optional)"},
                 ],
                 "browser_provider": "cloakbrowser",

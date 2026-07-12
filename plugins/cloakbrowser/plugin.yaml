@@ -1,11 +1,13 @@
 name: cloakbrowser
 version: 1.0.0
+# kind: backend — bundled backends auto-load (no plugins.enabled entry required).
+# This is the supported CloakBrowser path; do not use tools/browser_cloakbrowser.py.
+kind: backend
 description: >
   Thread-safe CloakBrowser backend for Hermes browser tools. Connects to a
   cloakserve CDP endpoint and overrides browser_* tools with Playwright on a
   dedicated worker thread (auto-snapshot on navigate, robust ref resolution,
-  console capture). Install under ~/.hermes/plugins/cloakbrowser to survive
-  Hermes upgrades without fork-specific browser_tool routing.
+  console capture). Enable with CLOAKBROWSER_CDP_URL (Camofox-shaped env gate).
 author: Hermes Agent
 hooks:
   - on_session_end

@@ -18,7 +18,7 @@ This branch layers **WebChat**, **CloakBrowser (docker)**, and **briefing-servic
 - **Plugin platforms** — `plugins/platforms/*` + `gateway/platform_registry.py`
 - **General plugins** — tools, hooks, CLI commands via `hermes_cli/plugins.py`
 
-This branch **restores Camofox** for upstream parity. Docker dev uses **CloakBrowser** via `docker-compose.override.yml` (`BROWSER_BACKEND=cloakbrowser`) — no Camofox container required locally.
+This branch **restores Camofox** for upstream parity. Docker dev uses **CloakBrowser** via `docker-compose.override.yml` (`CLOAKBROWSER_CDP_URL` + bundled `plugins/cloakbrowser`) — no Camofox container required locally.
 
 ## WebChat as a platform plugin (WebUI repo)
 
@@ -68,10 +68,16 @@ Tests: `tests/plugins/test_briefing_service_plugin.py`, `tests/tools/test_briefi
 
 ## CloakBrowser
 
-- Code: `tools/browser_cloakbrowser.py` + routing in `tools/browser_tool.py` (fork commit `2a64539e0`)
-- Runtime: `docker-compose.override.yml` only — not required in upstream
+Supported path (Camofox-shaped):
 
-Upstream Camofox and fork CloakBrowser coexist; `BROWSER_BACKEND` selects the active backend.
+- Plugin: `plugins/cloakbrowser` (`kind: backend` — bundled auto-load)
+- Env: `CLOAKBROWSER_CDP_URL=http://cloakbrowser:9222`
+- Sidecar: `docker-compose.override.yml` service `cloakbrowser` (`cloakserve`)
+- Ownership: plugin overrides `browser_*` on a dedicated Playwright worker thread
+
+Do **not** use `BROWSER_BACKEND=cloakbrowser` / `tools/browser_cloakbrowser.py` for gateway — that core path is not thread-safe and is disabled.
+
+Upstream Camofox (`CAMOFOX_URL`) and fork CloakBrowser (`CLOAKBROWSER_CDP_URL`) coexist; env URL selects the active local stealth backend.
 
 ## Recommended upgrade workflow
 

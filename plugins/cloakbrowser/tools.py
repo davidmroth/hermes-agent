@@ -83,7 +83,7 @@ def register_tools(ctx) -> None:
     if not backend.is_plugin_enabled():
         logger.info(
             "CloakBrowser plugin loaded but inactive "
-            "(set CLOAKBROWSER_CDP_URL or BROWSER_BACKEND=cloakbrowser to enable)"
+            "(set CLOAKBROWSER_CDP_URL to enable, e.g. http://cloakbrowser:9222)"
         )
         return
 

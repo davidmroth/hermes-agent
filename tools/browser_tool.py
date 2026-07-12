@@ -97,9 +97,9 @@ try:
 except ImportError:
     _is_camofox_mode = lambda: False  # noqa: E731
 
-# CloakBrowser stealth Chromium backend (optional).
-# When BROWSER_BACKEND=cloakbrowser, all browser operations route through
-# CloakBrowser's Playwright wrapper instead of agent-browser CLI or Camofox.
+# CloakBrowser is owned by plugins/cloakbrowser (CLOAKBROWSER_CDP_URL).
+# is_cloakbrowser_mode() is deprecated and always False so core routing
+# never uses the non-thread-safe helpers in tools/browser_cloakbrowser.py.
 try:
     from tools.browser_cloakbrowser import is_cloakbrowser_mode as _is_cloakbrowser_mode
 except ImportError:

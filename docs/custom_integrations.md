@@ -4,6 +4,8 @@ This file records the custom integration work that has landed in this branch, pl
 
 **Upgrade strategy:** see [`docs/upgrade_playbook.md`](upgrade_playbook.md) for the drop-in plugin layout, Camofox vs CloakBrowser split, and upstream merge workflow.
 
+**CloakBrowser (supported):** `CLOAKBROWSER_CDP_URL` + bundled `plugins/cloakbrowser` (`kind: backend`, auto-load). Do not use `BROWSER_BACKEND=cloakbrowser` / core `tools/browser_cloakbrowser.py` under the gateway.
+
 ## Recently Completed Follow-Up Slices
 
 The selected follow-up set from `v2026.4.23.diff` is now landed in this branch:

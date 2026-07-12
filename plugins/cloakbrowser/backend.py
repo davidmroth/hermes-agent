@@ -131,6 +131,8 @@ class _BrowserWorker:
         self._browser: Any = None
         self._pages: Dict[str, _PageSession] = {}
         self._console_capture = _env_flag("CLOAKBROWSER_CONSOLE_CAPTURE", default=True)
+        # Set to True when Playwright restart fails so _get_worker() replaces us.
+        self._playwright_broken = False
         self._thread.start()
         if not self._ready.wait(timeout=60):
             raise RuntimeError("CloakBrowser worker thread failed to start")
@@ -159,6 +161,8 @@ class _BrowserWorker:
     def _submit(self, fn: Callable[[], Any], timeout: float = 120.0) -> Any:
         if threading.current_thread() is self._thread:
             return fn()
+        if not self._thread.is_alive():
+            raise RuntimeError("CloakBrowser worker thread has exited")
         result_box: list[Any] = []
         done = threading.Event()
         self._queue.put((fn, result_box, done))
@@ -184,7 +188,47 @@ class _BrowserWorker:
                     pass
                 self._browser = None
 
-        self._submit(work, timeout=30)
+        try:
+            self._submit(work, timeout=30)
+        except Exception as exc:
+            # Cleanup failed (e.g. greenlet error in page.close) — clear state
+            # directly so the next _connect() starts with a clean slate.
+            logger.warning("CloakBrowser: _reset_connection failed (%s) — clearing state directly", exc)
+            self._pages.clear()
+            self._browser = None
+
+    def _restart_playwright(self) -> None:
+        """Reinitialize the Playwright sync instance on the worker thread.
+
+        Called when _reset_connection() + retry still hits greenlet errors,
+        meaning the Playwright sync instance itself is broken (not just the
+        browser/CDP connection).  After this, the next _connect() call will
+        create a fresh connection via CDP.
+        """
+        def work() -> None:
+            if self._playwright is not None:
+                try:
+                    self._playwright.stop()
+                except Exception:
+                    pass
+                self._playwright = None
+            self._browser = None
+            self._pages.clear()
+            from playwright.sync_api import sync_playwright
+            self._playwright = sync_playwright().start()
+
+        try:
+            self._submit(work, timeout=30)
+            self._playwright_broken = False
+            logger.info("CloakBrowser: Playwright instance restarted successfully")
+        except Exception as exc:
+            self._playwright_broken = True
+            logger.error("CloakBrowser: Playwright restart failed: %s", exc)
+            raise RuntimeError(f"Browser unavailable — Playwright restart failed: {exc}") from exc
+
+    def is_alive(self) -> bool:
+        """Return False when this worker should be replaced by _get_worker()."""
+        return self._thread.is_alive() and not self._playwright_broken
 
     def invoke(self, op: str, retry_on_thread_death: bool = True, **kwargs: Any) -> Any:
         def work() -> Any:
@@ -194,11 +238,23 @@ class _BrowserWorker:
         try:
             return self._submit(work, timeout=float(kwargs.pop("_timeout", 120)))
         except Exception as exc:
-            if retry_on_thread_death and is_thread_death_error(exc):
-                logger.warning("CloakBrowser thread/greenlet error — resetting CDP connection: %s", exc)
-                self._reset_connection()
+            if not (retry_on_thread_death and is_thread_death_error(exc)):
+                raise
+            logger.warning("CloakBrowser thread/greenlet error — resetting CDP connection: %s", exc)
+            self._reset_connection()
+            # First retry: reconnect using the same Playwright instance.
+            try:
                 return self._submit(work, timeout=120)
-            raise
+            except Exception as retry_exc:
+                if not is_thread_death_error(retry_exc):
+                    raise
+                # The Playwright sync instance itself is broken — restart it.
+                logger.warning(
+                    "CloakBrowser: retry also hit greenlet error — restarting Playwright: %s",
+                    retry_exc,
+                )
+                self._restart_playwright()
+                return self._submit(work, timeout=120)
 
     def _connect(self) -> Any:
         if self._browser is not None:
@@ -518,6 +574,13 @@ _worker_lock = threading.Lock()
 def _get_worker() -> _BrowserWorker:
     global _worker
     with _worker_lock:
+        if _worker is not None and not _worker.is_alive():
+            logger.warning("CloakBrowser: worker is dead/broken — creating replacement")
+            try:
+                _worker.shutdown()
+            except Exception:
+                pass
+            _worker = None
         if _worker is None:
             _worker = _BrowserWorker(get_cdp_url())
         return _worker

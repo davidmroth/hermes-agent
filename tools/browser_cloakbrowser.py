@@ -1,30 +1,16 @@
-"""CloakBrowser backend — stealth Chromium via CDP server.
+"""CloakBrowser backend — DEPRECATED core helpers.
 
-CloakBrowser is a Chromium binary with 58 source-level C++ patches (canvas,
-WebGL, audio, fonts, GPU, screen, WebRTC, network timing, automation signals,
-CDP input behavior).  When running as a ``cloakserve`` server it exposes a CDP
-endpoint that Hermes connects to via Playwright's ``connect_over_cdp()``.
+.. warning::
 
-When ``BROWSER_BACKEND=cloakbrowser`` is set, all browser operations route
-through this module instead of the ``agent-browser`` CLI or Camofox.
+   Do not use this module for gateway browser tools. The supported path is
+   ``plugins/cloakbrowser`` with ``CLOAKBROWSER_CDP_URL`` (thread-safe Playwright
+   worker). ``is_cloakbrowser_mode()`` always returns False so ``browser_tool``
+   never routes here.
 
-Setup::
+Historical notes (cloakserve CDP)::
 
-    # Docker (recommended)
     docker run -d --name cloak -p 127.0.0.1:9222:9222 cloakhq/cloakbrowser cloakserve
-
-    # Or via docker-compose (see docker-compose.override.yml)
-    docker compose up -d cloakbrowser
-
-Then set ``BROWSER_BACKEND=cloakbrowser`` in ``~/.hermes/.env``.
-
-Configuration:
-    BROWSER_BACKEND=cloakbrowser          # Activate this backend
-    CLOAKBROWSER_CDP_URL=http://host:9222  # Override CDP endpoint
-    CLOAKBROWSER_PROXY=http://user:pass@host:port  # Optional proxy
-    CLOAKBROWSER_HUMANIZE=1               # Enable human-like mouse/keyboard/scroll
-    CLOAKBROWSER_HEADLESS=0               # Run headed (default: 1/headless)
-    CLOAKBROWSER_FINGERPRINT=12345        # Fixed fingerprint seed (optional)
+    # Prefer: CLOAKBROWSER_CDP_URL=http://cloakbrowser:9222 + plugins/cloakbrowser
 """
 
 from __future__ import annotations
@@ -70,22 +56,18 @@ def get_cloakbrowser_cdp_url() -> str:
 
 
 def is_cloakbrowser_mode() -> bool:
-    """True when CloakBrowser backend is explicitly selected.
+    """Deprecated core routing — always False.
 
-    Priority order:
-    1. CDP override (BROWSER_CDP_URL) - highest priority
-    2. CloakBrowser (BROWSER_BACKEND=cloakbrowser)
-    3. Camofox (CAMOFOX_URL set)
-    4. Cloud provider
-    5. Local agent-browser (default)
+    CloakBrowser is owned by ``plugins/cloakbrowser`` (set ``CLOAKBROWSER_CDP_URL``).
+    The built-in Playwright helpers in this module are not thread-safe under the
+    gateway thread pool and must not be selected via ``BROWSER_BACKEND``.
     """
-    if os.getenv("BROWSER_CDP_URL", "").strip():
-        return False
     backend = _env_str("BROWSER_BACKEND", "").lower()
     if backend == "cloakbrowser":
-        return True
-    if backend:
-        return False
+        logger.warning(
+            "BROWSER_BACKEND=cloakbrowser is ignored for core routing; "
+            "use CLOAKBROWSER_CDP_URL so plugins/cloakbrowser owns browser_* tools"
+        )
     return False
 
 
