@@ -257,6 +257,8 @@ class TestLlamaCppTimingsExtraction:
             timings={
                 "prompt_n": 12,
                 "prompt_ms": 34.5,
+                "ttft_ms": 41.0,
+                "ttfb_ms": 41.0,
                 "predicted_n": 7,
                 "predicted_ms": 89.0,
                 "cache_n": 2,
@@ -267,6 +269,8 @@ class TestLlamaCppTimingsExtraction:
         assert agent._extract_llamacpp_timings(source) == {
             "prompt_n": 12,
             "prompt_ms": 34.5,
+            "ttft_ms": 41.0,
+            "ttfb_ms": 41.0,
             "predicted_n": 7,
             "predicted_ms": 89.0,
             "cache_n": 2,
