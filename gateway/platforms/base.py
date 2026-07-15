@@ -1843,6 +1843,22 @@ class BasePlatformAdapter(ABC):
         """
         pass
 
+    def create_title_callback(self, ctx: dict) -> Optional[Callable[..., Any]]:
+        """Return a sync ``title -> None`` callback for auto-generated titles.
+
+        Invoked from the auto-title background thread after the session DB
+        title is persisted. Platforms that can rename their own UI (forum
+        topics, conversation list titles, etc.) should override this and
+        return a callback that schedules platform work onto ``ctx["loop"]``
+        (typically via ``ctx["safe_schedule"]``).
+
+        ``ctx`` currently includes: ``runner``, ``source``, ``session_id``,
+        ``loop``, ``safe_schedule``, and ``logger``.
+
+        Default returns ``None`` (no platform UI update).
+        """
+        return None
+
     async def send_multiple_images(
         self,
         chat_id: str,

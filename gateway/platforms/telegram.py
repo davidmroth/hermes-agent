@@ -1024,6 +1024,25 @@ class TelegramAdapter(BasePlatformAdapter):
             self.name, chat_id, thread_id, name,
         )
 
+    def create_title_callback(self, ctx: dict):
+        """Rename Telegram DM topics when Hermes auto-titles the session."""
+        runner = ctx.get("runner")
+        source = ctx.get("source")
+        session_id = ctx.get("session_id")
+        if runner is None or source is None:
+            return None
+        is_topic_lane = getattr(runner, "_is_telegram_topic_lane", None)
+        schedule_rename = getattr(runner, "_schedule_telegram_topic_title_rename", None)
+        if not callable(is_topic_lane) or not callable(schedule_rename):
+            return None
+        if not is_topic_lane(source):
+            return None
+        return lambda title, _schedule=schedule_rename, _source=source, _sid=session_id: _schedule(
+            _source,
+            _sid,
+            title,
+        )
+
     def _persist_dm_topic_thread_id(self, chat_id: int, topic_name: str, thread_id: int) -> None:
         """Save a newly created thread_id back into config.yaml so it persists across restarts."""
         try:

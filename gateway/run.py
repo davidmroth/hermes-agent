@@ -15975,12 +15975,28 @@ class GatewayRunner:
                             "api_mode": getattr(agent, "api_mode", None),
                         } if agent else None,
                     }
-                    if self._is_telegram_topic_lane(source):
-                        maybe_auto_title_kwargs["title_callback"] = lambda title: self._schedule_telegram_topic_title_rename(
-                            source,
-                            effective_session_id,
-                            title,
+                    _title_adapter = (
+                        self.adapters.get(source.platform)
+                        if getattr(self, "adapters", None)
+                        else None
+                    )
+                    if _title_adapter is not None:
+                        _title_factory = getattr(
+                            _title_adapter, "create_title_callback", None
                         )
+                        if callable(_title_factory):
+                            _title_cb = _title_factory(
+                                {
+                                    "runner": self,
+                                    "source": source,
+                                    "session_id": effective_session_id,
+                                    "loop": _loop_for_step,
+                                    "safe_schedule": safe_schedule_threadsafe,
+                                    "logger": logger,
+                                }
+                            )
+                            if _title_cb is not None:
+                                maybe_auto_title_kwargs["title_callback"] = _title_cb
                     maybe_auto_title(
                         self._session_db,
                         effective_session_id,
