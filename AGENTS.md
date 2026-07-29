@@ -858,6 +858,19 @@ Full user-facing docs: `website/docs/user-guide/features/kanban.md`.
 
 ## Important Policies
 
+### Context Capacity Only Grows
+
+Never reduce model context size (`context_length`, `n_ctx`, or equivalent
+capacity limits) as a performance, cost, or “prompt processing” fix. The model
+and serving stack will only grow in capability over time. Optimize with prefix
+caching, routing, and engine efficiency — **not** by shrinking the context
+window. Shrinking is NEVER the option.
+
+Treat assembled prompts as a **heterogeneous** sequence of parts (identity,
+tools, memory, transcript, …), not one dense blob. Diff/reuse happens in
+`agent/context_preprocessor.py` (:class:`ContextPreprocessor`); engine KV snaps
+and provider ``cache_control`` remain separate consumers of that plan.
+
 ### Prompt Caching Must Not Break
 
 Hermes-Agent ensures caching remains valid throughout a conversation. **Do NOT implement changes that would:**
