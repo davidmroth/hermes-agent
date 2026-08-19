@@ -418,10 +418,13 @@ class TestPreflightCompression:
     def test_compress_context_emits_lifecycle_status_before_work(self, agent):
         """Direct context compression should tell gateway users why the turn paused."""
         events = []
+        touches = []
         agent.status_callback = lambda ev, msg: events.append((ev, msg))
+        agent._touch_activity = lambda desc: touches.append(desc)
 
         def _fake_compress(messages, current_tokens=None, focus_topic=None):
             events.append(("compress", "started"))
+            assert touches and touches[0].startswith("compressing context")
             return [{"role": "user", "content": f"{SUMMARY_PREFIX}\nPrevious conversation"}]
 
         with (
@@ -440,6 +443,7 @@ class TestPreflightCompression:
         assert events[0][0] == "lifecycle"
         assert "Compacting context" in events[0][1]
         assert events[1] == ("compress", "started")
+        assert any(desc.startswith("compressing context") for desc in touches)
 
     def test_preflight_compresses_oversized_history(self, agent):
         """When loaded history exceeds the model's context threshold, compress before API call."""

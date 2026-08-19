@@ -10844,6 +10844,29 @@ class AIAgent:
             "🗜️ Compacting context — summarizing earlier conversation so I can continue..."
         )
 
+        # Cron/gateway inactivity watchdogs only see `_touch_activity()`.
+        # Compression uses a separate LLM client that never heartbeats, so a
+        # long summarizer call (e.g. after a large create_briefing) looks idle
+        # and trips HERMES_CRON_TIMEOUT / gateway_timeout.
+        self._touch_activity("compressing context")
+        _compress_hb_stop = threading.Event()
+
+        def _compress_heartbeat():
+            started = time.monotonic()
+            while not _compress_hb_stop.wait(10.0):
+                try:
+                    elapsed = int(time.monotonic() - started)
+                    self._touch_activity(f"compressing context ({elapsed}s elapsed)")
+                except Exception:
+                    pass
+
+        _compress_hb_thread = threading.Thread(
+            target=_compress_heartbeat,
+            name="compress-heartbeat",
+            daemon=True,
+        )
+        _compress_hb_thread.start()
+
         # Notify external memory provider before compression discards context
         if self._memory_manager:
             try:
@@ -10852,11 +10875,14 @@ class AIAgent:
                 pass
 
         try:
-            compressed = self.context_compressor.compress(messages, current_tokens=approx_tokens, focus_topic=focus_topic)
-        except TypeError:
-            # Plugin context engine with strict signature that doesn't accept
-            # focus_topic — fall back to calling without it.
-            compressed = self.context_compressor.compress(messages, current_tokens=approx_tokens)
+            try:
+                compressed = self.context_compressor.compress(messages, current_tokens=approx_tokens, focus_topic=focus_topic)
+            except TypeError:
+                # Plugin context engine with strict signature that doesn't accept
+                # focus_topic — fall back to calling without it.
+                compressed = self.context_compressor.compress(messages, current_tokens=approx_tokens)
+        finally:
+            _compress_hb_stop.set()
 
         summary_error = getattr(self.context_compressor, "_last_summary_error", None)
         if summary_error:

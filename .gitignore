@@ -74,6 +74,9 @@ hermes_cli/tui_dist/*
 hermes_cli/scripts/
 docs/superpowers/*
 
+# Plugin dashboard build output
+plugins/**/dashboard/dist/
+
 # Local development overrides
 .services
 .data
